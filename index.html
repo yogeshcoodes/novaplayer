@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>NovaPlayer - Premium Media</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
+        rel="stylesheet" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Space+Mono&display=swap"
+        rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Courier+Prime:wght@400;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <meta name="theme-color" content="#121212">
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/browser-id3-writer@4.4.0/dist/browser-id3-writer.min.js"></script>
+</head>
+
+<body>
+    <!-- Splash Screen -->
+    <div id="splash-screen">
+        <div class="logo-container">
+            <span class="material-symbols-outlined splash-icon">play_circle</span>
+            <h1 class="splash-title">Nova<span>Player</span></h1>
+            <p class="splash-subtitle">Cinematic Local Experience</p>
+        </div>
+    </div>
+
+    <!-- Main Application -->
+    <div id="app" class="hidden">
+
+        <input type="file" id="video-upload" accept="video/*" multiple class="hidden">
+        <input type="file" id="folder-upload" webkitdirectory directory class="hidden">
+        <input type="file" id="sub-upload" accept=".vtt,.srt" class="hidden">
+        <input type="file" id="lyrics-bg-upload" accept="video/*" class="hidden">
+
+        <!-- Settings Panel -->
+        <div id="settings-panel" class="side-panel hidden stop-propagation">
+            <div class="panel-header">
+                <h3>Settings</h3>
+                <button class="icon-btn close-panel"><span class="material-symbols-outlined">close</span></button>
+            </div>
+            <div class="panel-content">
+                <div class="setting-item">
+                    <label>Enable Music Player</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="setting-music">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label>Auto-Show Lyrics on Play</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="setting-auto-lyrics">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label>Ping-Pong Lyrics Background</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="setting-lyrics-ping-pong">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <hr style="margin-top:0;">
+                <div class="setting-item">
+                    <label>AMOLED Pure Black</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="setting-amoled">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="setting-item flex-col">
+                    <label>Accent Theme Color</label>
+                    <div class="custom-select" id="select-theme">
+                        <div class="select-selected">Midnight (Default)</div>
+                        <div class="select-items hidden">
+                            <div data-value="dark">Midnight (Default)</div>
+                            <div data-value="ocean">Ocean Blue</div>
+                            <div data-value="crimson">Crimson Red</div>
+                            <div data-value="forest">Forest Green</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-item flex-col">
+                    <label>Resume Playback</label>
+                    <div class="custom-select" id="select-resume">
+                        <div class="select-selected">Ask</div>
+                        <div class="select-items hidden">
+                            <div data-value="always">Always Resume</div>
+                            <div data-value="ask">Ask</div>
+                            <div data-value="never">Start from Beginning</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-item flex-col">
+                    <label>Double Tap Seek</label>
+                    <div class="custom-select" id="select-dt">
+                        <div class="select-selected">10s</div>
+                        <div class="select-items hidden">
+                            <div data-value="5">5s</div>
+                            <div data-value="10">10s</div>
+                            <div data-value="15">15s</div>
+                            <div data-value="0">Disabled</div>
+                        </div>
+                    </div>
+                </div>
+                <hr>
+                <button class="btn outline-btn full-width" onclick="document.getElementById('sub-upload').click()">
+                    Load Subtitle (.srt/.vtt)
+                </button>
+            </div>
+        </div>
+
+        <!-- Welcome Screen & Smart File Manager -->
+        <div id="welcome-screen">
+            <button class="icon-btn absolute-top-right tooltip" data-tooltip="Settings" id="btn-welcome-settings">
+                <span class="material-symbols-outlined">settings</span>
+            </button>
+
+            <div class="welcome-card" id="drop-zone">
+                <span class="material-symbols-outlined big-icon">library_music</span>
+                <h2>Media Library</h2>
+                <p id="welcome-formats">Supports MP4, WebM, MKV</p>
+                <div class="welcome-actions">
+                    <button class="btn primary-btn" id="btn-select-files">
+                        <span class="material-symbols-outlined">draft</span> Select Files
+                    </button>
+                    <button class="btn outline-btn" id="btn-load-folder">
+                        <span class="material-symbols-outlined">folder_open</span> Load Folder
+                    </button>
+                </div>
+            </div>
+
+            <div class="file-manager-container hidden" id="file-manager">
+                <div class="fm-header">
+                    <h2>Your Library</h2>
+                    <div class="fm-actions">
+                        <button class="icon-btn tooltip" data-tooltip="Add Files" id="btn-fm-add-files"><span
+                                class="material-symbols-outlined">add</span></button>
+                        <button class="icon-btn tooltip" data-tooltip="Load Folder" id="btn-fm-load-folder"><span
+                                class="material-symbols-outlined">create_new_folder</span></button>
+                    </div>
+                </div>
+
+                <div class="fm-search-box">
+                    <span class="material-symbols-outlined search-icon">search</span>
+                    <input type="text" id="fm-search" placeholder="Search files...">
+                </div>
+
+                <div class="fm-list" id="fm-list"></div>
+            </div>
+        </div>
+
+        <!-- Video Player Interface -->
+        <div id="player-container" class="hidden">
+            <div class="video-wrapper" id="video-wrapper">
+
+                <div id="music-art-box" class="hidden">
+                    <div id="music-art-bg"></div>
+                    <img id="music-art-img" class="hidden" alt="Album Art">
+                    <span class="material-symbols-outlined" id="default-music-icon">music_note</span>
+                </div>
+
+                <video id="main-video" preload="metadata" decoding="async"></video>
+
+                <!-- Smart Cinematic Lyrics Engine -->
+                <div id="lyrics-container" class="hidden theme-aesthetic">
+
+                    <video id="lyrics-bg-video" autoplay loop muted playsinline src="assets/aesthetic.mp4"></video>
+                    <div class="lyrics-bg-overlay"></div>
+
+                    <div class="lyrics-header stop-propagation">
+                        <button class="btn outline-btn small-btn" id="btn-lyrics-theme">
+                            <span class="material-symbols-outlined" style="font-size: 16px;">palette</span> Style:
+                            Aesthetic
+                        </button>
+                        <button class="icon-btn close-lyrics tooltip" data-tooltip="Lyrics font" id="btn-lyrics-font"
+                            aria-label="Lyrics font"><span class="material-symbols-outlined">edit_note</span></button>
+                        <button class="icon-btn close-lyrics tooltip" data-tooltip="Choose background video"
+                            id="btn-lyrics-bg-upload" aria-label="Choose background video"><span
+                                class="material-symbols-outlined">video_library</span></button>
+                        <button class="icon-btn close-lyrics tooltip" data-tooltip="Edit Lyrics"
+                            id="btn-edit-lyrics"><span class="material-symbols-outlined">edit</span></button>
+                        <button class="icon-btn close-lyrics tooltip" data-tooltip="Close" id="btn-close-lyrics"><span
+                                class="material-symbols-outlined">close</span></button>
+                    </div>
+
+                    <div class="lyrics-font-menu hidden stop-propagation" id="lyrics-font-menu" role="menu"
+                        aria-label="Lyrics font">
+                        <button type="button" role="menuitemradio" data-lyrics-font="default">Default</button>
+                        <button type="button" role="menuitemradio" data-lyrics-font="vintage">Vintage</button>
+                        <button type="button" role="menuitemradio" data-lyrics-font="typewriter">Typewriter</button>
+                        <button type="button" role="menuitemradio" data-lyrics-font="cursive">Cursive</button>
+                    </div>
+
+                    <!-- Kinetic 2-Line Cinema Stage -->
+                    <div id="lyrics-display" class="lyrics-content stop-propagation">
+                        <div id="stage-active-line" class="stage-line active-line"></div>
+                        <div id="stage-next-line" class="stage-line next-line"></div>
+                    </div>
+
+                    <!-- Editor Mode -->
+                    <div id="lyrics-editor" class="hidden stop-propagation">
+                        <div class="lyrics-editor-actions">
+                            <button class="btn outline-btn" id="btn-auto-fetch-lyrics" title="Search online database">
+                                <span class="material-symbols-outlined">cloud_download</span> Database
+                            </button>
+                            <button class="btn outline-btn" id="btn-ai-align"
+                                title="Take my exact text and sync timestamps to audio!">
+                                <span class="material-symbols-outlined">auto_fix_high</span> Sync My Text
+                            </button>
+                        </div>
+                        <textarea id="lyrics-input"
+                            placeholder="Paste lyrics in any language (English, Hindi, Chinese, etc.).&#10;&#10;Click 'Sync My Text' to automatically attach timestamps to your words, or click 'View Lyrics' to see them instantly!"></textarea>
+
+                        <div class="editor-bottom-actions">
+                            <button class="btn outline-btn" id="btn-preview-lyrics">
+                                <span class="material-symbols-outlined">visibility</span> View / Play
+                            </button>
+                            <button class="btn primary-btn" id="btn-save-lyrics">
+                                <span class="material-symbols-outlined">save</span> Save to File
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="lyrics-empty-state" class="hidden lyrics-content stop-propagation">
+                        <span class="material-symbols-outlined"
+                            style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;">lyrics</span>
+                        <p>No lyrics found.</p>
+                        <button class="btn primary-btn mt-10" id="btn-add-lyrics">Add or Fetch Lyrics</button>
+                    </div>
+                </div>
+
+                <!-- Overlays -->
+                <div id="speed-indicator" class="hidden">
+                    <span class="material-symbols-outlined">fast_forward</span> <span id="speed-indicator-text">2x
+                        Speed</span>
+                </div>
+                <div id="center-volume-indicator" class="hidden">
+                    <span class="material-symbols-outlined" id="center-vol-icon">volume_up</span>
+                    <div class="center-vol-bar-bg">
+                        <div class="center-vol-bar-fill" id="center-vol-fill"></div>
+                    </div>
+                    <span class="center-vol-text" id="center-vol-text">100%</span>
+                </div>
+                <div id="center-play-pause-indicator" class="hidden"><span class="material-symbols-outlined"
+                        id="center-pp-icon">play_arrow</span></div>
+                <div id="dt-ripple-left" class="dt-ripple dt-left">
+                    <div class="dt-content"><span class="material-symbols-outlined single-arrow">fast_rewind</span><span
+                            class="dt-seconds">10s</span></div>
+                </div>
+                <div id="dt-ripple-right" class="dt-ripple dt-right">
+                    <div class="dt-content"><span
+                            class="material-symbols-outlined single-arrow">fast_forward</span><span
+                            class="dt-seconds">10s</span></div>
+                </div>
+            </div>
+
+            <div id="resume-toast" class="hidden">
+                <div class="resume-text">Resume from <b id="resume-time-txt">00:00</b>?</div>
+                <div class="resume-actions">
+                    <button class="btn outline-btn" id="btn-resume-no">Start Over</button>
+                    <button class="btn primary-btn" id="btn-resume-yes">Resume</button>
+                </div>
+                <button class="icon-btn close-toast" id="btn-resume-close"><span class="material-symbols-outlined"
+                        style="font-size: 18px;">close</span></button>
+            </div>
+
+            <!-- Controls -->
+            <div class="player-controls top-controls stop-propagation">
+                <button class="icon-btn tooltip" data-tooltip="Library" id="btn-close-video">
+                    <span class="material-symbols-outlined">arrow_back</span>
+                </button>
+                <div class="video-title" id="video-title">No media loaded</div>
+                <div class="top-right-controls">
+                    <button class="icon-btn tooltip" data-tooltip="Crop & Pan" id="btn-crop-menu">
+                        <span class="material-symbols-outlined">crop</span>
+                    </button>
+                    <button class="icon-btn tooltip" data-tooltip="Settings" id="btn-settings-player">
+                        <span class="material-symbols-outlined">settings</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="player-controls bottom-controls stop-propagation">
+                <div class="progress-container" id="progress-container">
+                    <div id="thumbnail-preview" class="hidden">
+                        <video id="preview-video" muted playsinline preload="metadata"></video>
+                        <span id="preview-time">00:00</span>
+                    </div>
+                    <div class="progress-bar" id="progress-bar">
+                        <div class="progress-filled" id="progress-filled"></div>
+                        <div class="progress-thumb"></div>
+                    </div>
+                </div>
+
+                <div class="controls-row">
+                    <div class="controls-left">
+                        <button class="icon-btn tooltip" data-tooltip="Previous track" id="btn-previous-track"
+                            aria-label="Previous track" disabled><span
+                                class="material-symbols-outlined">skip_previous</span></button>
+                        <button class="icon-btn" id="btn-play"><span class="material-symbols-outlined"
+                                id="play-icon">play_arrow</span></button>
+                        <button class="icon-btn tooltip" data-tooltip="Next track" id="btn-next-track"
+                            aria-label="Next track" disabled><span
+                                class="material-symbols-outlined">skip_next</span></button>
+                        <div class="volume-container">
+                            <button class="icon-btn" id="btn-mute"><span class="material-symbols-outlined"
+                                    id="mute-icon">volume_up</span></button>
+                            <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1">
+                        </div>
+                        <div class="time-display"><span id="current-time">00:00</span> / <span
+                                id="duration">00:00</span></div>
+                    </div>
+
+                    <div class="controls-right">
+                        <button class="icon-btn tooltip text-btn" data-tooltip="Playback Speed"
+                            id="btn-speed">1x</button>
+                        <button class="icon-btn tooltip" data-tooltip="Repeat: Off" id="btn-repeat-mode"
+                            aria-label="Repeat: Off" aria-pressed="false"><span class="material-symbols-outlined"
+                                id="repeat-mode-icon">repeat</span></button>
+                        <button class="icon-btn tooltip" data-tooltip="Lyrics" id="btn-toggle-lyrics">
+                            <span class="material-symbols-outlined">lyrics</span>
+                        </button>
+                        <button class="icon-btn tooltip" data-tooltip="Picture in Picture" id="btn-pip">
+                            <span class="material-symbols-outlined">picture_in_picture_alt</span>
+                        </button>
+                        <button class="icon-btn tooltip" data-tooltip="Fullscreen" id="btn-fullscreen">
+                            <span class="material-symbols-outlined" id="fullscreen-icon">fullscreen</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="crop-panel" class="side-panel hidden stop-propagation">
+                <div class="panel-header">
+                    <h3>Adjustments</h3>
+                    <button class="icon-btn close-panel"><span class="material-symbols-outlined">close</span></button>
+                </div>
+                <div class="panel-content">
+                    <div class="preset-buttons">
+                        <button class="btn outline-btn" data-preset="fit">Fit</button>
+                        <button class="btn outline-btn" data-preset="fill">Fill</button>
+                        <button class="btn outline-btn" data-preset="stretch">Stretch</button>
+                        <button class="btn outline-btn" data-preset="21:9">21:9</button>
+                    </div>
+                    <div class="slider-group"><label>Top Crop (<span id="crop-top-val">0</span>%)</label><input
+                            type="range" id="crop-top" min="0" max="50" value="0"></div>
+                    <div class="slider-group"><label>Bottom Crop (<span id="crop-bottom-val">0</span>%)</label><input
+                            type="range" id="crop-bottom" min="0" max="50" value="0"></div>
+                    <div class="slider-group"><label>Left Crop (<span id="crop-left-val">0</span>%)</label><input
+                            type="range" id="crop-left" min="0" max="50" value="0"></div>
+                    <div class="slider-group"><label>Right Crop (<span id="crop-right-val">0</span>%)</label><input
+                            type="range" id="crop-right" min="0" max="50" value="0"></div>
+                    <hr>
+                    <div class="slider-group"><label>Zoom (<span id="zoom-slider-val">1.00</span>x)</label><input
+                            type="range" id="zoom-slider" min="1" max="3" step="0.05" value="1"></div>
+                    <hr>
+                    <div class="slider-group"><label>Cinematic Bar Fix (<span
+                                id="stretch-slider-val">0</span>%)</label><input type="range" id="stretch-slider"
+                            min="0" max="40" step="1" value="0"></div>
+                    <button class="btn primary-btn full-width mt-10" id="btn-reset-crop">Reset All</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+
+</html>
