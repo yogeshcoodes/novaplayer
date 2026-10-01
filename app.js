@@ -609,10 +609,6 @@ document.addEventListener("DOMContentLoaded", () => {
                         p.appendChild(span);
                     });
                 }
-                p.addEventListener('click', () => {
-                    video.currentTime = line.time;
-                    video.play().catch(() => { });
-                });
                 lyricsDisplay.appendChild(p);
                 line.element = p;
             });
