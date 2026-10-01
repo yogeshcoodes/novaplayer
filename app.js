@@ -1664,3 +1664,51 @@ document.addEventListener("DOMContentLoaded", () => {
         return h > 0 ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}` : `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
 });
+
+
+// --- Anti-Inspection & DevTools Blocker ---
+(function () {
+    // Disable Right-Click (Context Menu)
+    document.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+    });
+
+    // Disable common DevTools keyboard shortcuts
+    document.addEventListener('keydown', function (e) {
+        // Disable F12
+        if (e.key === 'F12' || e.keyCode === 123) {
+            e.preventDefault();
+            return false;
+        }
+
+        // Disable Ctrl+Shift+I / Cmd+Option+I (Inspect)
+        if ((e.ctrlKey || e.metaKey) && (e.shiftKey || e.altKey) && (e.key.toLowerCase() === 'i' || e.keyCode === 73)) {
+            e.preventDefault();
+            return false;
+        }
+
+        // Disable Ctrl+Shift+J / Cmd+Option+J (Console)
+        if ((e.ctrlKey || e.metaKey) && (e.shiftKey || e.altKey) && (e.key.toLowerCase() === 'j' || e.keyCode === 74)) {
+            e.preventDefault();
+            return false;
+        }
+
+        // Disable Ctrl+Shift+C / Cmd+Option+C (Element Inspector)
+        if ((e.ctrlKey || e.metaKey) && (e.shiftKey || e.altKey) && (e.key.toLowerCase() === 'c' || e.keyCode === 67)) {
+            e.preventDefault();
+            return false;
+        }
+
+        // Disable Ctrl+U / Cmd+U (View Page Source)
+        if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'u' || e.keyCode === 85)) {
+            e.preventDefault();
+            return false;
+        }
+
+        // Disable Ctrl+S / Cmd+S (Save Page)
+        if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 's' || e.keyCode === 83)) {
+            e.preventDefault();
+            return false;
+        }
+    }, false);
+})();
