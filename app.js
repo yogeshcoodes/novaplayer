@@ -128,8 +128,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let lyricsMetadataReady = true;
     let autoLyricsLookupFileKey = null;
     let customLyricsBgUrl = null;
-    let pingPongTimer = null;
-    let lyricsBackgroundDirection = 1;
+    let pingPongRunId = 0;
 
     // Cinematic Sync Engine States
     let syncedLyricsData = [];
@@ -195,7 +194,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 1200);
 
     // --- Settings Setup ---
-    const defaultSettings = { theme: 'dark', amoled: false, resumeAction: 'ask', doubleTapSeek: 10, spaceSpeed: 2.0, musicMode: false, lyricsTheme: 0, autoShowLyrics: true, repeatMode: 'off', lyricsPingPong: false, lyricsFont: 'default' };
+    const defaultSettings = { theme: 'dark', amoled: false, resumeAction: 'ask', doubleTapSeek: 10, spaceSpeed: 2.0, musicMode: true, musicModeExplicit: false, lyricsTheme: 0, autoShowLyrics: true, repeatMode: 'off', lyricsPingPong: false, lyricsFont: 'default' };
     let appSettings = defaultSettings;
     try {
         const saved = localStorage.getItem('novaSettings');
@@ -203,6 +202,12 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (e) { appSettings = defaultSettings; }
 
     function saveSettings() { try { localStorage.setItem('novaSettings', JSON.stringify(appSettings)); } catch (e) { } }
+
+    if (!appSettings.musicModeExplicit) {
+        appSettings.musicMode = true;
+        appSettings.musicModeExplicit = true;
+        saveSettings();
+    }
 
     if (!['off', 'all', 'one'].includes(appSettings.repeatMode)) appSettings.repeatMode = 'off';
 
@@ -255,6 +260,7 @@ document.addEventListener("DOMContentLoaded", () => {
         musicToggle.checked = !!appSettings.musicMode;
         musicToggle.addEventListener('change', () => {
             appSettings.musicMode = musicToggle.checked;
+            appSettings.musicModeExplicit = true;
             saveSettings();
             updateMusicSettingsUI();
         });
@@ -783,9 +789,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function updateLyricsBackgroundPlayback() {
-        clearInterval(pingPongTimer);
-        pingPongTimer = null;
-        lyricsBackgroundDirection = 1;
+        pingPongRunId++;
         lyricsBgVideo.pause();
         lyricsBgVideo.loop = !appSettings.lyricsPingPong;
         if (appSettings.lyricsPingPong && lyricsBgVideo.ended) lyricsBgVideo.currentTime = 0;
@@ -794,19 +798,45 @@ document.addEventListener("DOMContentLoaded", () => {
 
     lyricsBgVideo.addEventListener('ended', () => {
         if (!appSettings.lyricsPingPong || !Number.isFinite(lyricsBgVideo.duration)) return;
+        const runId = ++pingPongRunId;
+        const frameDuration = 1000 / 24;
+        let nextFrameAt = performance.now();
+        let previousStepAt = nextFrameAt;
         lyricsBgVideo.pause();
-        lyricsBackgroundDirection = -1;
-        pingPongTimer = setInterval(() => {
-            if (lyricsBgVideo.readyState < 2 || lyricsBgVideo.seeking) return;
-            const nextTime = Math.max(0, lyricsBgVideo.currentTime - (1 / 24));
-            lyricsBgVideo.currentTime = nextTime;
-            if (nextTime === 0) {
-                clearInterval(pingPongTimer);
-                pingPongTimer = null;
-                lyricsBackgroundDirection = 1;
+
+        const stepBackward = () => {
+            if (!appSettings.lyricsPingPong || runId !== pingPongRunId) return;
+            const now = performance.now();
+            const elapsed = Math.max(frameDuration, now - previousStepAt);
+            previousStepAt = now;
+            const nextTime = Math.max(0, lyricsBgVideo.currentTime - (elapsed / 1000));
+            const finishReverse = () => {
+                lyricsBgVideo.removeEventListener('seeked', finishReverse);
+                if (!appSettings.lyricsPingPong || runId !== pingPongRunId) return;
                 lyricsBgVideo.play().catch(() => { });
+            };
+
+            if (nextTime === 0) {
+                if (lyricsBgVideo.currentTime === 0) {
+                    finishReverse();
+                } else {
+                    lyricsBgVideo.addEventListener('seeked', finishReverse, { once: true });
+                    lyricsBgVideo.currentTime = 0;
+                }
+                return;
             }
-        }, 1000 / 24);
+
+            const continueReverse = () => {
+                lyricsBgVideo.removeEventListener('seeked', continueReverse);
+                if (!appSettings.lyricsPingPong || runId !== pingPongRunId) return;
+                nextFrameAt += frameDuration;
+                setTimeout(stepBackward, Math.max(0, nextFrameAt - performance.now()));
+            };
+            lyricsBgVideo.addEventListener('seeked', continueReverse, { once: true });
+            lyricsBgVideo.currentTime = nextTime;
+        };
+
+        stepBackward();
     });
 
     function loadCustomLyricsBackground(file) {

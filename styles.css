@@ -160,7 +160,8 @@ body {
 /* --- Welcome Screen & File Manager --- */
 #welcome-screen {
     height: 100vh;
-    width: 100vw;
+    height: 100dvh;
+    width: 100%;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -210,9 +211,13 @@ body {
 }
 
 .file-manager-container {
+    flex: 0 1 100%;
     width: 100%;
     max-width: 900px;
     height: 85vh;
+    height: min(85dvh, calc(100dvh - 24px));
+    min-height: 0;
+    min-width: 0;
     background: var(--md-sys-color-surface);
     border-radius: 24px;
     display: flex;
@@ -272,16 +277,23 @@ body {
 
 .fm-list {
     flex: 1;
+    width: 100%;
+    max-width: 100%;
+    min-height: 0;
+    min-width: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 15px;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
     gap: 15px;
     align-content: start;
 }
 
 .file-item {
     display: flex;
+    width: 100%;
+    min-width: 0;
     align-items: center;
     gap: 15px;
     padding: 15px;
@@ -305,6 +317,8 @@ body {
 
 .file-info {
     display: flex;
+    flex: 1 1 0;
+    min-width: 0;
     flex-direction: column;
     overflow: hidden;
 }
@@ -1517,6 +1531,114 @@ input[type=range]::-moz-range-thumb:hover {
 }
 
 @media (max-width: 768px) {
+    #welcome-screen {
+        padding: 12px;
+    }
+
+    .welcome-card {
+        padding: 28px 18px;
+        border-radius: 16px;
+    }
+
+    .big-icon {
+        font-size: 48px;
+        margin-bottom: 12px;
+    }
+
+    .welcome-actions {
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 16px;
+    }
+
+    .welcome-actions .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .file-manager-container {
+        flex: 0 1 100%;
+        width: 100%;
+        height: min(82dvh, calc(100dvh - 24px));
+        min-width: 0;
+        border-radius: 16px;
+    }
+
+    .fm-header {
+        flex: 0 0 auto;
+        min-height: 52px;
+        padding: 8px 12px;
+    }
+
+    .fm-header h2 {
+        font-size: 1.1rem;
+    }
+
+    .fm-actions {
+        gap: 4px;
+    }
+
+    .fm-actions .icon-btn {
+        width: 34px;
+        height: 34px;
+    }
+
+    .fm-search-box {
+        flex: 0 0 auto;
+        width: 100%;
+        min-width: 0;
+        padding: 8px 10px;
+    }
+
+    .fm-search-box input {
+        padding: 10px 12px 10px 38px;
+    }
+
+    .fm-search-box .search-icon {
+        margin-left: 12px;
+    }
+
+    .fm-list {
+        width: 100%;
+        grid-template-columns: minmax(0, 1fr);
+        padding: 8px;
+        gap: 8px;
+        overscroll-behavior: contain;
+    }
+
+    .file-item {
+        gap: 10px;
+        padding: 11px;
+        border-radius: 10px;
+    }
+
+    .file-icon {
+        flex: 0 0 auto;
+        font-size: 28px;
+    }
+
+    .top-controls {
+        gap: 4px;
+        padding: 8px 10px;
+        padding-top: max(8px, env(safe-area-inset-top));
+    }
+
+    .top-controls .icon-btn {
+        width: 34px;
+        height: 34px;
+    }
+
+    .video-title {
+        min-width: 0;
+        max-width: none;
+        margin-left: 8px;
+        font-size: 0.84rem;
+    }
+
+    .top-right-controls {
+        gap: 4px;
+    }
+
     .volume-container input {
         display: none;
     }
