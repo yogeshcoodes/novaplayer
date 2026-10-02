@@ -2038,7 +2038,13 @@ document.addEventListener("DOMContentLoaded", () => {
     function engageHoldSpeed(rate) { isHolding = true; video.playbackRate = rate; if (speedIndicatorText) speedIndicatorText.textContent = `${rate}x Speed`; if (speedIndicator) speedIndicator.classList.remove('hidden'); }
     window.addEventListener('keydown', (e) => {
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
-        if (e.code === 'Space') {
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === 'KeyU') {
+            e.preventDefault();
+            navigatePlaylist(1);
+        } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === 'KeyP') {
+            e.preventDefault();
+            navigatePlaylist(-1);
+        } else if (e.code === 'Space') {
             e.preventDefault(); if (e.repeat) return;
             isSpaceHeld = true;
             if (video.readyState >= 2 && !video.paused) {
