@@ -461,6 +461,11 @@ body {
 }
 
 #music-art-img {
+    position: absolute;
+    top: 16vh;
+    left: 0;
+    right: 0;
+    margin: 0 auto;
     width: min(45vh, 80vw);
     height: min(45vh, 80vw);
     object-fit: cover;
@@ -752,6 +757,43 @@ video {
     transition: opacity 0.3s ease;
 }
 
+.lyrics-bg-warning {
+    position: absolute;
+    inset: 0;
+    z-index: 80;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.64);
+}
+
+.lyrics-bg-warning-card {
+    width: min(420px, 100%);
+    padding: 22px;
+    border: 1px solid var(--md-sys-color-surface-variant);
+    border-radius: 16px;
+    background: var(--md-sys-color-surface);
+    color: var(--md-sys-color-on-surface);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+.lyrics-bg-warning-card h2 {
+    margin-bottom: 10px;
+    font-size: 1.15rem;
+}
+
+.lyrics-bg-warning-card p {
+    line-height: 1.5;
+    opacity: 0.8;
+}
+
+.lyrics-bg-warning-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+}
+
 .lyrics-top-controls {
     position: absolute;
     top: 80px;
@@ -808,12 +850,19 @@ video {
 }
 
 .lofi-effects-panel {
-    transition: opacity 0.3s ease;
+    visibility: visible;
+    transition: opacity 0.3s ease, visibility 0s;
 }
 
 .lofi-effects-panel.idle {
     opacity: 0;
-    pointer-events: none;
+    visibility: hidden;
+    pointer-events: none !important;
+    transition: opacity 0.3s ease, visibility 0s linear 0.3s;
+}
+
+.lofi-effects-panel.idle * {
+    pointer-events: none !important;
 }
 
 .lofi-effect-control {

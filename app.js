@@ -142,6 +142,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let lyricsMetadataReady = true;
     let autoLyricsLookupFileKey = null;
     let customLyricsBgUrl = null;
+    let pendingLyricsBgUrl = null;
     let pingPongRunId = 0;
 
     // Cinematic Sync Engine States
@@ -556,7 +557,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         lofiSpeedSlider.value = isEnabled ? '0.9' : '1';
         lofiSpeedSlider.dispatchEvent(new Event('input', { bubbles: true }));
-        lofiReverbSlider.value = isEnabled ? '75' : '0';
+        lofiReverbSlider.value = isEnabled ? '40' : '0';
         lofiReverbSlider.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
@@ -1168,26 +1169,55 @@ document.addEventListener("DOMContentLoaded", () => {
         stepBackward();
     });
 
+    const lyricsBgWarning = document.getElementById('lyrics-bg-warning');
+    const lyricsBgWarningMessage = document.getElementById('lyrics-bg-warning-message');
+    const btnAddLyricsBgAnyway = document.getElementById('btn-add-lyrics-bg-anyway');
+    const btnCancelLyricsBg = document.getElementById('btn-cancel-lyrics-bg');
+
+    function applyCustomLyricsBackground(url) {
+        if (customLyricsBgUrl) URL.revokeObjectURL(customLyricsBgUrl);
+        customLyricsBgUrl = url;
+        pendingLyricsBgUrl = null;
+        lyricsBgWarning.classList.add('hidden');
+        updateLyricsTheme();
+    }
+
+    function cancelPendingLyricsBackground() {
+        if (pendingLyricsBgUrl) URL.revokeObjectURL(pendingLyricsBgUrl);
+        pendingLyricsBgUrl = null;
+        lyricsBgWarning.classList.add('hidden');
+    }
+
+    btnAddLyricsBgAnyway.addEventListener('click', () => {
+        if (pendingLyricsBgUrl) applyCustomLyricsBackground(pendingLyricsBgUrl);
+    });
+    btnCancelLyricsBg.addEventListener('click', cancelPendingLyricsBackground);
+
     function loadCustomLyricsBackground(file) {
         if (!file || !file.type.startsWith('video/')) {
             alert('Choose a video file for the lyrics background.');
+            return;
+        }
+        cancelPendingLyricsBackground();
+        const sizeInMb = file.size / (1024 * 1024);
+        if (sizeInMb > 500) {
+            alert('Lyrics background videos must be 500 MB or smaller.');
             return;
         }
         const candidateUrl = URL.createObjectURL(file);
         const probe = document.createElement('video');
         probe.preload = 'metadata';
         probe.onloadedmetadata = () => {
-            const duration = probe.duration;
             probe.removeAttribute('src');
             probe.load();
-            if (!Number.isFinite(duration) || duration > 12) {
-                URL.revokeObjectURL(candidateUrl);
-                alert('Lyrics background videos must be 12 seconds or shorter.');
-                return;
+            if (sizeInMb > 10) {
+                pendingLyricsBgUrl = candidateUrl;
+                lyricsBgWarningMessage.textContent =
+                    `This ${sizeInMb.toFixed(1)} MB background video may cause playback issues on some devices.`;
+                lyricsBgWarning.classList.remove('hidden');
+            } else {
+                applyCustomLyricsBackground(candidateUrl);
             }
-            if (customLyricsBgUrl) URL.revokeObjectURL(customLyricsBgUrl);
-            customLyricsBgUrl = candidateUrl;
-            updateLyricsTheme();
         };
         probe.onerror = () => {
             URL.revokeObjectURL(candidateUrl);
@@ -1803,9 +1833,20 @@ document.addEventListener("DOMContentLoaded", () => {
                 isHolding = true; video.playbackRate = appSettings.spaceSpeed || 2.0;
                 if (speedIndicatorText) speedIndicatorText.textContent = `${appSettings.spaceSpeed || 2.0}x Speed`;
                 if (speedIndicator) speedIndicator.classList.remove('hidden');
-            }, 300);
+            }, 2000);
         });
     }
+
+    window.addEventListener('pointercancel', () => {
+        clearTimeout(holdTimeout);
+        holdTimeout = null;
+        if (isHolding) {
+            isHolding = false;
+            video.playbackRate = currentSpeed;
+            if (speedIndicator) speedIndicator.classList.add('hidden');
+        }
+        isDragging = false;
+    });
 
     window.addEventListener('pointermove', (e) => {
         if (isPanning && !isAudioPlaying) {
@@ -1860,10 +1901,6 @@ document.addEventListener("DOMContentLoaded", () => {
         } else {
             lastTapTime = now; lastTapRegion = tapRegion;
             clickTimeout = setTimeout(() => {
-                if (lyricsContainer.classList.contains('hidden')) {
-                    togglePlay();
-                    showCenterPlayPause();
-                }
                 lastTapTime = 0;
             }, 300);
         }
