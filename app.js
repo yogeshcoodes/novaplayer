@@ -958,13 +958,15 @@ document.addEventListener("DOMContentLoaded", () => {
         isAudioPlaying = isAudio;
         lofiControls.classList.toggle('hidden', !isAudio);
         if (isAudio) {
+            const lofiEnabled = btnLofiToggle.classList.contains('active');
+            if (lofiEnabled) video.playbackRate = parseFloat(lofiSpeedSlider.value);
             currentSpeed = video.playbackRate;
-            btnSpeed.textContent = `${video.playbackRate}x`;
-            lofiSpeedSlider.value = video.playbackRate;
-            lofiSpeedValue.textContent = `${video.playbackRate.toFixed(2)}x`;
-            if ('preservesPitch' in video) video.preservesPitch = video.playbackRate === 1;
-            if ('mozPreservesPitch' in video) video.mozPreservesPitch = video.playbackRate === 1;
-            if ('webkitPreservesPitch' in video) video.webkitPreservesPitch = video.playbackRate === 1;
+            btnSpeed.textContent = `${currentSpeed}x`;
+            if (!lofiEnabled) lofiSpeedSlider.value = currentSpeed;
+            lofiSpeedValue.textContent = `${currentSpeed.toFixed(2)}x`;
+            if ('preservesPitch' in video) video.preservesPitch = currentSpeed === 1;
+            if ('mozPreservesPitch' in video) video.mozPreservesPitch = currentSpeed === 1;
+            if ('webkitPreservesPitch' in video) video.webkitPreservesPitch = currentSpeed === 1;
             if (lofiReverbGain && lofiAudioContext) {
                 const reverbAmount = parseFloat(lofiReverbSlider.value) / 100;
                 updateLofiReverbMix(reverbAmount);
@@ -1058,9 +1060,21 @@ document.addEventListener("DOMContentLoaded", () => {
         welcomeScreen.classList.add('hidden');
         playerContainer.classList.remove('hidden');
         resetCrop();
-        video.load();
 
         video.onloadedmetadata = () => {
+            if (currentFile === file && isAudioPlaying && btnLofiToggle.classList.contains('active')) {
+                const rate = parseFloat(lofiSpeedSlider.value);
+                video.playbackRate = rate;
+                currentSpeed = rate;
+                btnSpeed.textContent = `${rate}x`;
+                lofiSpeedValue.textContent = `${rate.toFixed(2)}x`;
+                if ('preservesPitch' in video) video.preservesPitch = rate === 1;
+                if ('mozPreservesPitch' in video) video.mozPreservesPitch = rate === 1;
+                if ('webkitPreservesPitch' in video) video.webkitPreservesPitch = rate === 1;
+                if (lofiReverbGain && lofiAudioContext) {
+                    updateLofiReverbMix(parseFloat(lofiReverbSlider.value) / 100);
+                }
+            }
             if (timeDuration) timeDuration.textContent = formatTime(video.duration);
             const savedStr = localStorage.getItem(`resume_${fileKey}`);
             if (savedStr) {
@@ -1077,6 +1091,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 } else { video.play().catch(() => { }); }
             } else { video.play().catch(() => { }); }
         };
+        video.load();
     }
 
     if (btnResumeYes) btnResumeYes.addEventListener('click', () => { video.currentTime = pendingResumeTime; dismissResumeToast(); });
