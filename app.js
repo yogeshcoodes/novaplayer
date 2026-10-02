@@ -513,18 +513,30 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     let lofiIdleTimeout;
+    let lofiFadeTimeout;
     function showLofiEffectsPanel() {
         clearTimeout(lofiIdleTimeout);
+        clearTimeout(lofiFadeTimeout);
+        lofiEffectsPanel.classList.remove('hidden');
         lofiEffectsPanel.classList.remove('idle');
+        lofiEffectsPanel.inert = false;
         lofiEffectsPanel.setAttribute('aria-hidden', 'false');
         lofiIdleTimeout = setTimeout(() => {
-            lofiEffectsPanel.classList.add('idle');
-            lofiEffectsPanel.setAttribute('aria-hidden', 'true');
+            hideLofiEffectsPanel();
         }, 4000);
     }
 
+    function hideLofiEffectsPanel() {
+        clearTimeout(lofiIdleTimeout);
+        lofiEffectsPanel.classList.add('idle');
+        lofiEffectsPanel.inert = true;
+        lofiEffectsPanel.setAttribute('aria-hidden', 'true');
+        lofiFadeTimeout = setTimeout(() => lofiEffectsPanel.classList.add('hidden'), 300);
+    }
+
     btnLofiToggle.addEventListener('click', () => {
-        if (btnLofiToggle.classList.contains('active') && lofiEffectsPanel.classList.contains('idle')) {
+        if (btnLofiToggle.classList.contains('active') &&
+            (lofiEffectsPanel.classList.contains('idle') || lofiEffectsPanel.classList.contains('hidden'))) {
             showLofiEffectsPanel();
             return;
         }
@@ -533,10 +545,13 @@ document.addEventListener("DOMContentLoaded", () => {
         lofiEffectsPanel.classList.toggle('hidden', !isEnabled);
         btnLofiToggle.setAttribute('aria-expanded', String(isEnabled));
         clearTimeout(lofiIdleTimeout);
+        clearTimeout(lofiFadeTimeout);
         if (isEnabled) {
             showLofiEffectsPanel();
         } else {
             lofiEffectsPanel.classList.remove('idle');
+            lofiEffectsPanel.classList.add('hidden');
+            lofiEffectsPanel.inert = true;
             lofiEffectsPanel.setAttribute('aria-hidden', 'true');
         }
         lofiSpeedSlider.value = isEnabled ? '0.9' : '1';
@@ -549,9 +564,7 @@ document.addEventListener("DOMContentLoaded", () => {
     lofiEffectsPanel.addEventListener('input', showLofiEffectsPanel);
     document.addEventListener('click', event => {
         if (!lofiControls.contains(event.target) && !lofiEffectsPanel.classList.contains('hidden')) {
-            clearTimeout(lofiIdleTimeout);
-            lofiEffectsPanel.classList.add('idle');
-            lofiEffectsPanel.setAttribute('aria-hidden', 'true');
+            hideLofiEffectsPanel();
         }
     }, true);
 
@@ -622,14 +635,23 @@ document.addEventListener("DOMContentLoaded", () => {
     async function loadDemoSong() {
         if (!appSettings.musicMode) return;
 
+        dropZone.classList.add('hidden');
+        fileManager.classList.remove('hidden');
+        const demoStatus = document.createElement('p');
+        demoStatus.className = 'fm-demo-status';
+        demoStatus.setAttribute('role', 'status');
+        demoStatus.textContent = 'Loading demo song...';
+        fmList.replaceChildren(demoStatus);
+
         try {
-            const response = await fetch('demo-song/Demo-Apocalypse.mp3');
+            const response = await fetch('demo-song/Demo%20-%20Apocalypse.mp3');
             if (!response.ok) throw new Error(`Unable to load demo song (${response.status}).`);
-            const file = new File([await response.blob()], 'Demo-Apocalypse.mp3', { type: 'audio/mpeg' });
+            const file = new File([await response.blob()], 'Demo - Apocalypse.mp3', { type: 'audio/mpeg' });
             fmFilesMap.set(`demo:${file.name}:${file.size}`, { file, handle: null });
             renderFileManagerList();
         } catch (error) {
             console.error('Could not load the NovaPlayer demo song:', error);
+            demoStatus.textContent = 'Demo song could not be loaded. You can still add your own files.';
         }
     }
 
@@ -1073,7 +1095,7 @@ document.addEventListener("DOMContentLoaded", () => {
         updateLyricsBackgroundPlayback();
 
         const names = ['Aesthetic', 'Lo-Fi', 'Sans'];
-        btnLyricsTheme.innerHTML = `<span class="material-symbols-outlined" style="font-size: 16px;">palette</span> Style: ${names[currentLyricsThemeIdx]}`;
+        btnLyricsTheme.innerHTML = `<span class="material-symbols-outlined" style="font-size: 16px;">palette</span> ${names[currentLyricsThemeIdx]}`;
     }
 
     function updateLyricsFont(font = appSettings.lyricsFont) {
