@@ -175,11 +175,17 @@
                     <video id="lyrics-bg-video" autoplay loop muted playsinline src="assets/aesthetic.mp4"></video>
                     <div class="lyrics-bg-overlay"></div>
 
-                    <div class="lyrics-header stop-propagation">
-                        <button class="btn outline-btn small-btn" id="btn-lyrics-theme">
+                    <div class="lyrics-top-controls">
+                        <button class="btn outline-btn small-btn lyrics-style-control" id="btn-lyrics-theme">
                             <span class="material-symbols-outlined" style="font-size: 16px;">palette</span> Style:
                             Aesthetic
                         </button>
+                        <button class="btn outline-btn small-btn lyrics-show-toggle" id="btn-lyrics-mode-toggle"
+                            type="button" aria-pressed="false">
+                            Auto
+                        </button>
+                    </div>
+                    <div class="lyrics-header stop-propagation">
                         <button class="icon-btn close-lyrics tooltip" data-tooltip="Lyrics font" id="btn-lyrics-font"
                             aria-label="Lyrics font"><span class="material-symbols-outlined">edit_note</span></button>
                         <button class="icon-btn close-lyrics tooltip" data-tooltip="Choose background video"
@@ -187,7 +193,8 @@
                                 class="material-symbols-outlined">video_library</span></button>
                         <button class="icon-btn close-lyrics tooltip" data-tooltip="Edit Lyrics"
                             id="btn-edit-lyrics"><span class="material-symbols-outlined">edit</span></button>
-                        <button class="icon-btn close-lyrics tooltip" data-tooltip="Close" id="btn-close-lyrics"><span
+                        <button class="icon-btn close-lyrics tooltip" data-tooltip="Hide controls"
+                            aria-label="Hide controls" id="btn-close-lyrics"><span
                                 class="material-symbols-outlined">close</span></button>
                     </div>
 
@@ -200,7 +207,7 @@
                     </div>
 
                     <!-- Kinetic 2-Line Cinema Stage -->
-                    <div id="lyrics-display" class="lyrics-content stop-propagation">
+                    <div id="lyrics-display" class="lyrics-content">
                         <div id="stage-active-line" class="stage-line active-line"></div>
                         <div id="stage-next-line" class="stage-line next-line"></div>
                     </div>
@@ -216,6 +223,7 @@
                                 <span class="material-symbols-outlined">auto_fix_high</span> Sync My Text
                             </button>
                         </div>
+                        <div id="ai-align-status" class="ai-align-status hidden" role="status" aria-live="polite"></div>
                         <textarea id="lyrics-input"
                             placeholder="Paste lyrics in any language (English, Hindi, Chinese, etc.).&#10;&#10;Click 'Sync My Text' to automatically attach timestamps to your words, or click 'View Lyrics' to see them instantly!"></textarea>
 
@@ -300,6 +308,11 @@
                     </div>
                 </div>
 
+                <div class="time-display" aria-label="Playback time">
+                    <span id="current-time">00:00</span>
+                    <span id="duration">00:00</span>
+                </div>
+
                 <div class="controls-row">
                     <div class="controls-left">
                         <button class="icon-btn tooltip" data-tooltip="Previous track" id="btn-previous-track"
@@ -315,8 +328,6 @@
                                     id="mute-icon">volume_up</span></button>
                             <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1">
                         </div>
-                        <div class="time-display"><span id="current-time">00:00</span> / <span
-                                id="duration">00:00</span></div>
                     </div>
 
                     <div class="controls-right">

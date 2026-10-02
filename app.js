@@ -89,6 +89,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const lyricsContainer = document.getElementById('lyrics-container');
     const lyricsBgVideo = document.getElementById('lyrics-bg-video');
     const lyricsDisplay = document.getElementById('lyrics-display');
+    const lyricsTopControls = document.querySelector('.lyrics-top-controls');
+    const lyricsHeader = document.querySelector('.lyrics-header');
     const lyricsEditor = document.getElementById('lyrics-editor');
     const lyricsEmptyState = document.getElementById('lyrics-empty-state');
     const lyricsInput = document.getElementById('lyrics-input');
@@ -97,6 +99,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnCloseLyrics = document.getElementById('btn-close-lyrics');
     const btnEditLyrics = document.getElementById('btn-edit-lyrics');
     const btnLyricsTheme = document.getElementById('btn-lyrics-theme');
+    const btnLyricsModeToggle = document.getElementById('btn-lyrics-mode-toggle');
     const btnLyricsFont = document.getElementById('btn-lyrics-font');
     const lyricsFontMenu = document.getElementById('lyrics-font-menu');
     const btnLyricsBgUpload = document.getElementById('btn-lyrics-bg-upload');
@@ -135,7 +138,6 @@ document.addEventListener("DOMContentLoaded", () => {
     let lyricCueTimes = [];
     let lastActiveLineIndex = -1;
     const lyricIdleTimeout = 10;
-    const lyricHighlightLead = 0.7;
 
     let fmFilesMap = new Map();
     let lyricsThemes = ['theme-aesthetic', 'theme-lofi', 'theme-sans'];
@@ -153,21 +155,36 @@ document.addEventListener("DOMContentLoaded", () => {
         console.warn('AI worker could not start. Open NovaPlayer over HTTP to enable local AI.', error);
     }
 
+    function setAiStatus(message, type = 'error') {
+        const box = document.getElementById('ai-align-status');
+        if (!box) return;
+        box.textContent = message;
+        box.className = `ai-align-status visible ${type}`;
+    }
+
+    function clearAiStatus() {
+        const box = document.getElementById('ai-align-status');
+        if (!box) return;
+        box.textContent = '';
+        box.className = 'ai-align-status hidden';
+    }
+
     if (aiWorker) aiWorker.onmessage = (e) => {
         const { status, message } = e.data;
 
         if (status === 'loading' || status === 'processing') {
             btnAiAlign.innerHTML = `<span class="material-symbols-outlined">auto_fix_high</span> ${message}`;
+            clearAiStatus();
         } else if (status === 'success_aligned') {
             lyricsInput.value = e.data.lrc;
             lyricsEditor.classList.remove('hidden');
             lyricsDisplay.classList.add('hidden');
             lyricsEmptyState.classList.add('hidden');
-            alert('Your lyrics were aligned to the recognized vocal timing. Review them, then choose View / Play or Save to File.');
+            setAiStatus('Lyrics aligned successfully. Review them and choose View / Play or Save to File.', 'success');
             resetAiAlignButton();
         } else if (status === 'error') {
             console.error(message);
-            alert("Lyrics alignment failed: " + message);
+            setAiStatus(message, 'error');
             resetAiAlignButton();
         }
     };
@@ -175,6 +192,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (aiWorker) aiWorker.onerror = (event) => {
         aiWorkerAvailable = false;
         console.error('AI worker failed to load:', event.message);
+        setAiStatus('Speech alignment worker failed to load. Retry or open the app over HTTP.', 'error');
         resetAiAlignButton();
     };
 
@@ -194,7 +212,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 1200);
 
     // --- Settings Setup ---
-    const defaultSettings = { theme: 'dark', amoled: false, resumeAction: 'ask', doubleTapSeek: 10, spaceSpeed: 2.0, musicMode: true, musicModeExplicit: false, lyricsTheme: 0, autoShowLyrics: true, repeatMode: 'off', lyricsPingPong: false, lyricsFont: 'default' };
+    const defaultSettings = { theme: 'dark', amoled: false, resumeAction: 'ask', doubleTapSeek: 10, spaceSpeed: 2.0, musicMode: true, musicModeExplicit: false, lyricsTheme: 1, autoShowLyrics: true, repeatMode: 'off', lyricsPingPong: false, lyricsFont: 'default', lyricsDisplayMode: 'auto' };
     let appSettings = defaultSettings;
     try {
         const saved = localStorage.getItem('novaSettings');
@@ -234,6 +252,20 @@ document.addEventListener("DOMContentLoaded", () => {
     currentLyricsThemeIdx = appSettings.lyricsTheme || 0;
     updateLyricsTheme();
     updateLyricsFont(appSettings.lyricsFont);
+    updateLyricsDisplayMode();
+
+    if (btnLyricsModeToggle) {
+        btnLyricsModeToggle.addEventListener('click', () => {
+            appSettings.lyricsDisplayMode = appSettings.lyricsDisplayMode === 'manual' ? 'auto' : 'manual';
+            saveSettings();
+            updateLyricsDisplayMode();
+            const text = getCurrentLyrics();
+            if (text && !lyricsDisplay.classList.contains('hidden') && lyricsEditor.classList.contains('hidden')) {
+                renderLyricsToDisplay(text);
+                if (appSettings.lyricsDisplayMode === 'auto') updateLyricsAtTime(video.currentTime);
+            }
+        });
+    }
 
     if (lyricsPingPongToggle) {
         lyricsPingPongToggle.checked = !!appSettings.lyricsPingPong;
@@ -350,6 +382,26 @@ document.addEventListener("DOMContentLoaded", () => {
         return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
     }
 
+    function getFileExtension(fileName = '') {
+        return String(fileName).split('.').pop()?.toLowerCase() || '';
+    }
+
+    function isVideoFile(file) {
+        if (!file) return false;
+        const fileName = file.name || '';
+        return file.type.startsWith('video/') || /\.(mp4|webm|mkv|mov|avi|m4v)$/i.test(fileName);
+    }
+
+    function isAudioFile(file) {
+        if (!file) return false;
+        const fileName = file.name || '';
+        return file.type.startsWith('audio/') || /\.(mp3|wav|flac|m4a|aac|ogg|opus)$/i.test(fileName);
+    }
+
+    function isSupportedMediaFile(file) {
+        return isVideoFile(file) || (appSettings.musicMode && isAudioFile(file));
+    }
+
     function renderFileManagerList() {
         dropZone.classList.add('hidden');
         fileManager.classList.remove('hidden');
@@ -367,7 +419,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const fragment = document.createDocumentFragment();
         fmFilesMap.forEach((data, id) => {
             const { file, handle } = data;
-            const isAudio = file.type.startsWith('audio/') || file.name.endsWith('.mp3');
+            const isAudio = isAudioFile(file);
             const item = document.createElement('div');
             item.className = 'file-item';
             item.innerHTML = `
@@ -383,6 +435,22 @@ document.addEventListener("DOMContentLoaded", () => {
         fmList.appendChild(fragment);
         updateTrackNavigationButtons();
     }
+
+    async function loadDemoSong() {
+        if (!appSettings.musicMode) return;
+
+        try {
+            const response = await fetch('demo-song/Demo-Apocalypse.mp3');
+            if (!response.ok) throw new Error(`Unable to load demo song (${response.status}).`);
+            const file = new File([await response.blob()], 'Demo-Apocalypse.mp3', { type: 'audio/mpeg' });
+            fmFilesMap.set(`demo:${file.name}:${file.size}`, { file, handle: null });
+            renderFileManagerList();
+        } catch (error) {
+            console.error('Could not load the NovaPlayer demo song:', error);
+        }
+    }
+
+    loadDemoSong();
 
     function getPlaylistEntries() {
         return Array.from(fmFilesMap.entries()).sort((left, right) =>
@@ -448,8 +516,8 @@ document.addEventListener("DOMContentLoaded", () => {
     async function openFilePicker() {
         if (window.showOpenFilePicker) {
             try {
-                const acceptFilters = { 'video/*': ['.mp4', '.webm', '.mkv'] };
-                if (appSettings.musicMode) { acceptFilters['audio/*'] = ['.mp3', '.flac', '.wav', '.m4a']; }
+                const acceptFilters = { 'video/*': ['.mp4', '.webm', '.mkv', '.mov', '.avi', '.m4v'] };
+                if (appSettings.musicMode) { acceptFilters['audio/*'] = ['.mp3', '.flac', '.wav', '.m4a', '.aac', '.ogg', '.opus']; }
 
                 const handles = await window.showOpenFilePicker({
                     multiple: true,
@@ -457,7 +525,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 });
                 for (const handle of handles) {
                     const file = await handle.getFile();
-                    if (file.type.startsWith('video/') || (appSettings.musicMode && (file.type.startsWith('audio/') || file.name.endsWith('.mp3')))) {
+                    if (isSupportedMediaFile(file)) {
                         fmFilesMap.set(file.name + file.size, { file, handle });
                     }
                 }
@@ -475,7 +543,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 for await (const entry of dirHandle.values()) {
                     if (entry.kind === 'file') {
                         const file = await entry.getFile();
-                        if (file.type.startsWith('video/') || (appSettings.musicMode && (file.type.startsWith('audio/') || file.name.endsWith('.mp3')))) {
+                        if (isSupportedMediaFile(file)) {
                             fmFilesMap.set(file.name + file.size, { file, handle: entry });
                         }
                     }
@@ -494,13 +562,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (videoUpload) videoUpload.addEventListener('change', e => {
         if (e.target.files.length) {
-            Array.from(e.target.files).forEach(f => fmFilesMap.set(f.name + f.size, { file: f, handle: null }));
+            Array.from(e.target.files)
+                .filter(file => isSupportedMediaFile(file))
+                .forEach(f => fmFilesMap.set(f.name + f.size, { file: f, handle: null }));
             renderFileManagerList();
         }
     });
     if (folderUpload) folderUpload.addEventListener('change', e => {
         if (e.target.files.length) {
-            Array.from(e.target.files).forEach(f => fmFilesMap.set(f.name + f.size, { file: f, handle: null }));
+            Array.from(e.target.files)
+                .filter(file => isSupportedMediaFile(file))
+                .forEach(f => fmFilesMap.set(f.name + f.size, { file: f, handle: null }));
             renderFileManagerList();
         }
     });
@@ -527,7 +599,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function handleDrop(e) {
         if (e.dataTransfer.files.length) {
-            Array.from(e.dataTransfer.files).forEach(f => fmFilesMap.set(f.name + f.size, { file: f, handle: null }));
+            Array.from(e.dataTransfer.files)
+                .filter(file => isSupportedMediaFile(file))
+                .forEach(f => fmFilesMap.set(f.name + f.size, { file: f, handle: null }));
             renderFileManagerList();
         }
     }
@@ -579,42 +653,61 @@ document.addEventListener("DOMContentLoaded", () => {
         return parsed.sort((a, b) => a.time - b.time);
     }
 
+    function getLatestLyricCue(time) {
+        let latestCue = null;
+        for (const cueTime of lyricCueTimes) {
+            if (cueTime > time) break;
+            latestCue = cueTime;
+        }
+        return latestCue;
+    }
+
+    function applyLyricLineStates(activeIndex) {
+        syncedLyricsData.forEach((line, index) => {
+            line.element.className = 'lyric-line';
+            if (index === activeIndex) line.element.classList.add('active');
+            else if (index === activeIndex - 1) line.element.classList.add('previous');
+            else if (index === activeIndex + 1) line.element.classList.add('next');
+            else if (index === activeIndex + 2) line.element.classList.add('next-next');
+            else line.element.classList.add('past');
+        });
+    }
+
     function renderLyricsToDisplay(text) {
         lyricsDisplay.innerHTML = '';
+        const isManualMode = appSettings.lyricsDisplayMode === 'manual';
         syncedLyricsData = parseLRC(text);
         lyricCueTimes = syncedLyricsData.flatMap(line =>
             line.words && line.words.length ? line.words.map(word => word.time) : [line.time]
         ).sort((left, right) => left - right);
         lastActiveLineIndex = -1;
 
+        if (isManualMode) {
+            lyricCueTimes = [];
+            lyricsDisplay.classList.remove('lyrics-display-idle');
+            lyricsDisplay.classList.add('static-lyrics-mode');
+            videoWrapper.classList.add('static-lyrics-scroll');
+            const lines = syncedLyricsData.length
+                ? syncedLyricsData.map(line => line.text || (line.words || []).map(word => word.text).join(' ')).filter(Boolean)
+                : text.split('\n').map(l => l.trim().replace(/\[.*?\]/g, '').replace(/<[^>]*>/g, '')).filter(l => l);
+            lines.forEach(line => {
+                const p = document.createElement('p');
+                p.className = 'lyric-line static-lyric';
+                p.textContent = line;
+                lyricsDisplay.appendChild(p);
+            });
+            return;
+        }
+
         if (syncedLyricsData.length > 0) {
+            videoWrapper.classList.remove('static-lyrics-scroll');
             lyricsDisplay.classList.remove('static-lyrics-mode');
             syncedLyricsData.forEach((line, index) => {
                 const p = document.createElement('div');
                 p.className = 'lyric-line';
                 p.dataset.index = index;
                 p.dataset.time = line.time;
-
-                if (line.words) {
-                    line.words.forEach((word, wordIndex) => {
-                        if (wordIndex) p.appendChild(document.createTextNode(' '));
-                        const span = document.createElement('span');
-                        span.className = 'lyric-word elrc-word';
-                        span.style.setProperty('--w-idx', wordIndex);
-                        span.dataset.time = word.time;
-                        span.textContent = word.text;
-                        p.appendChild(span);
-                    });
-                } else {
-                    line.text.split(/\s+/).forEach((word, wordIndex) => {
-                        if (wordIndex) p.appendChild(document.createTextNode(' '));
-                        const span = document.createElement('span');
-                        span.className = 'lyric-word';
-                        span.style.setProperty('--w-idx', wordIndex);
-                        span.textContent = word;
-                        p.appendChild(span);
-                    });
-                }
+                p.textContent = line.text || (line.words || []).map(word => word.text).join(' ');
                 lyricsDisplay.appendChild(p);
                 line.element = p;
             });
@@ -625,23 +718,18 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (syncedLyricsData[index].time > currentTime) break;
                 initialActiveIndex = index;
             }
-            syncedLyricsData.forEach((line, index) => {
-                if (index === initialActiveIndex) line.element.classList.add('active');
-                else if (initialActiveIndex >= 0 && index === initialActiveIndex + 1) line.element.classList.add('next');
-                else line.element.classList.add('past');
-            });
+            applyLyricLineStates(initialActiveIndex);
             lastActiveLineIndex = initialActiveIndex;
-            const latestCue = lyricCueTimes.filter(time => time <= currentTime).pop();
-            const nextCue = lyricCueTimes.find(time => time > currentTime);
-            const cueStartingSoon = nextCue !== undefined && nextCue - currentTime <= lyricHighlightLead;
+            const latestCue = getLatestLyricCue(currentTime);
             lyricsDisplay.classList.toggle(
                 'lyrics-display-idle',
-                !cueStartingSoon && (latestCue === undefined || currentTime - latestCue >= lyricIdleTimeout)
+                latestCue === null || currentTime - latestCue >= lyricIdleTimeout
             );
         } else {
             lyricCueTimes = [];
             lyricsDisplay.classList.remove('lyrics-display-idle');
             lyricsDisplay.classList.add('static-lyrics-mode');
+            videoWrapper.classList.add('static-lyrics-scroll');
             const lines = text.split('\n').map(l => l.trim().replace(/\[.*?\]/g, '').replace(/<[^>]*>/g, '')).filter(l => l);
             lines.forEach(line => {
                 const p = document.createElement('p');
@@ -655,8 +743,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- File Handling & Meta Reading ---
     function handleFile(file, handle = null) {
         if (!file) return;
-        const isVideo = file.type.startsWith('video/');
-        const isAudio = file.type.startsWith('audio/') || file.name.endsWith('.mp3');
+        const isVideo = isVideoFile(file);
+        const isAudio = isAudioFile(file);
 
         currentFile = file;
         currentFileHandle = handle;
@@ -731,6 +819,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         dismissResumeToast();
         lyricsContainer.classList.add('hidden');
+        videoWrapper.classList.remove('static-lyrics-scroll');
 
         while (video.firstChild) video.removeChild(video.firstChild);
         welcomeScreen.classList.add('hidden');
@@ -786,6 +875,14 @@ document.addEventListener("DOMContentLoaded", () => {
         lyricsFontMenu.querySelectorAll('[data-lyrics-font]').forEach(option => {
             option.setAttribute('aria-checked', String(option.dataset.lyricsFont === currentLyricsFont));
         });
+    }
+
+    function updateLyricsDisplayMode() {
+        const mode = appSettings.lyricsDisplayMode === 'manual' ? 'manual' : 'auto';
+        if (btnLyricsModeToggle) {
+            btnLyricsModeToggle.textContent = mode === 'manual' ? 'Manual' : 'Auto';
+            btnLyricsModeToggle.setAttribute('aria-pressed', String(mode === 'manual'));
+        }
     }
 
     function updateLyricsBackgroundPlayback() {
@@ -921,10 +1018,20 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         } else {
             lyricsContainer.classList.add('hidden');
+            videoWrapper.classList.remove('static-lyrics-scroll');
         }
     });
 
-    btnCloseLyrics.addEventListener('click', () => lyricsContainer.classList.add('hidden'));
+    btnCloseLyrics.addEventListener('click', event => {
+        event.stopPropagation();
+        controls.forEach(control => control.classList.add('hide'));
+        lyricsTopControls.classList.add('hide');
+        lyricsHeader.classList.add('hide');
+        lyricsFontMenu.classList.add('hidden');
+        dismissResumeToast();
+        if (playerContainer) playerContainer.style.cursor = 'none';
+        clearTimeout(hideControlsTimeout);
+    });
 
     function getCurrentLyrics() {
         return (fileKey && localStorage.getItem(`${fileKey}_lyrics`)) || currentLyrics;
@@ -956,6 +1063,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     btnEditLyrics.addEventListener('click', () => {
+        videoWrapper.classList.remove('static-lyrics-scroll');
         lyricsDisplay.classList.add('hidden');
         lyricsEmptyState.classList.add('hidden');
         lyricsEditor.classList.remove('hidden');
@@ -964,6 +1072,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     btnAddLyrics.addEventListener('click', () => {
+        videoWrapper.classList.remove('static-lyrics-scroll');
         lyricsEmptyState.classList.add('hidden');
         lyricsEditor.classList.remove('hidden');
         lyricsInput.value = '';
@@ -1095,16 +1204,17 @@ document.addEventListener("DOMContentLoaded", () => {
     btnAutoFetchLyrics.addEventListener('click', () => fetchLyricsForCurrentTrack());
 
     btnAiAlign.addEventListener('click', async () => {
+        clearAiStatus();
         if (!currentFile) return;
         if (!aiWorkerAvailable) {
-            alert('The AI worker is unavailable. Launch NovaPlayer with Nova Player.bat or open it over HTTP; file:// blocks the local AI model.');
+            setAiStatus('The AI worker is unavailable. Open the app over HTTP to enable local AI.', 'error');
             return;
         }
         const userLines = lyricsInput.value.split(/\r?\n/)
             .map(line => line.replace(/^\s*\[\d{2,}:\d{2}(?:[.:]\d{1,3})?\]\s*/, '').trim())
             .filter(Boolean);
         if (!userLines.length) {
-            alert('Enter or fetch the lyrics first, then use Sync My Text.');
+            setAiStatus('Enter or fetch the lyrics first, then use Sync My Text.', 'error');
             return;
         }
 
@@ -1118,7 +1228,7 @@ document.addEventListener("DOMContentLoaded", () => {
             await audioContext.close();
         } catch (error) {
             console.error(error);
-            alert('Audio decode failed: ' + error.message);
+            setAiStatus('Audio decode failed: ' + error.message, 'error');
             btnAiAlign.disabled = false;
             btnAiAlign.innerHTML = `<span class="material-symbols-outlined">auto_fix_high</span> Sync My Text`;
         }
@@ -1227,14 +1337,77 @@ document.addEventListener("DOMContentLoaded", () => {
         ppAnimTimeout = setTimeout(() => centerPPIndicator.classList.add('hidden'), 1500);
     }
 
+    function updateLyricsAtTime(syncTime) {
+        if (appSettings.lyricsDisplayMode === 'manual') return;
+        if (!syncedLyricsData.length || lyricsContainer.classList.contains('hidden')) return;
+
+        let activeIndex = -1;
+        for (let index = 0; index < syncedLyricsData.length; index++) {
+            if (syncTime >= syncedLyricsData[index].time) activeIndex = index;
+            else break;
+        }
+
+        const latestCue = getLatestLyricCue(syncTime);
+        lyricsDisplay.classList.toggle(
+            'lyrics-display-idle',
+            latestCue === null || syncTime - latestCue >= lyricIdleTimeout
+        );
+
+        if (activeIndex !== lastActiveLineIndex) {
+            applyLyricLineStates(activeIndex);
+            lastActiveLineIndex = activeIndex;
+        }
+    }
+
+    let lyricFrameRequest = null;
+    let lyricFrameUsesVideoCallback = false;
+
+    function updateLyricsOnFrame(_now, metadata) {
+        lyricFrameRequest = null;
+        if (video.paused || video.ended) return;
+
+        const frameTime = metadata && Number.isFinite(metadata.mediaTime) ? metadata.mediaTime : video.currentTime;
+        updateLyricsAtTime(frameTime);
+        if (video.paused || video.ended) return;
+
+        if (lyricFrameUsesVideoCallback) {
+            lyricFrameRequest = video.requestVideoFrameCallback(updateLyricsOnFrame);
+        } else {
+            lyricFrameRequest = requestAnimationFrame(updateLyricsOnFrame);
+        }
+    }
+
+    function startLyricsFrameUpdates() {
+        if (lyricFrameRequest !== null) return;
+        lyricFrameUsesVideoCallback = !isAudioPlaying && typeof video.requestVideoFrameCallback === 'function';
+        lyricFrameRequest = lyricFrameUsesVideoCallback
+            ? video.requestVideoFrameCallback(updateLyricsOnFrame)
+            : requestAnimationFrame(updateLyricsOnFrame);
+    }
+
+    function stopLyricsFrameUpdates() {
+        if (lyricFrameRequest === null) return;
+        if (lyricFrameUsesVideoCallback && typeof video.cancelVideoFrameCallback === 'function') {
+            video.cancelVideoFrameCallback(lyricFrameRequest);
+        } else {
+            cancelAnimationFrame(lyricFrameRequest);
+        }
+        lyricFrameRequest = null;
+    }
+
     if (btnPlay) btnPlay.addEventListener('click', togglePlay);
     btnPreviousTrack.addEventListener('click', () => navigatePlaylist(-1));
     btnNextTrack.addEventListener('click', () => navigatePlaylist(1));
     video.addEventListener('play', () => {
         if (playIcon) playIcon.textContent = 'pause';
+        startLyricsFrameUpdates();
         if (appSettings.autoShowLyrics) ensureLyricsForCurrentTrack();
     });
-    video.addEventListener('pause', () => { if (playIcon) playIcon.textContent = 'play_arrow'; });
+    video.addEventListener('pause', () => {
+        if (playIcon) playIcon.textContent = 'play_arrow';
+        stopLyricsFrameUpdates();
+        updateLyricsAtTime(video.currentTime);
+    });
     video.addEventListener('ended', () => {
         if (appSettings.repeatMode === 'all') navigatePlaylist(1, true);
     });
@@ -1257,56 +1430,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (progressThumb) progressThumb.style.left = `${percent}%`;
                 if (timeCurrent) timeCurrent.textContent = formatTime(ct);
 
-                // --- ADVANCED KARAOKE SYNC ALGORITHM ---
-                if (syncedLyricsData.length > 0 && !lyricsContainer.classList.contains('hidden')) {
-                    let activeIndex = -1;
-
-                    const syncTime = ct;
-
-                    for (let i = 0; i < syncedLyricsData.length; i++) {
-                        if (syncTime >= syncedLyricsData[i].time) {
-                            activeIndex = i;
-                        } else { break; }
-                    }
-                    let latestCue = null;
-                    let nextCue = null;
-                    for (const cueTime of lyricCueTimes) {
-                        if (cueTime > syncTime) {
-                            nextCue = cueTime;
-                            break;
-                        }
-                        latestCue = cueTime;
-                    }
-                    const cueStartingSoon = nextCue !== null && nextCue - syncTime <= lyricHighlightLead;
-                    lyricsDisplay.classList.toggle(
-                        'lyrics-display-idle',
-                        !cueStartingSoon && (latestCue === null || syncTime - latestCue >= lyricIdleTimeout)
-                    );
-
-                    if (activeIndex !== lastActiveLineIndex) {
-                        syncedLyricsData.forEach((line, idx) => {
-                            line.element.className = 'lyric-line';
-                            if (activeIndex >= 0 && idx === activeIndex) line.element.classList.add('active');
-                            else if (activeIndex >= 0 && idx === activeIndex + 1) line.element.classList.add('next');
-                            else if (idx < activeIndex) line.element.classList.add('past');
-                            else line.element.classList.add('past');
-                        });
-                        lastActiveLineIndex = activeIndex;
-                    }
-
-                    if (activeIndex !== -1) {
-                        const activeLine = syncedLyricsData[activeIndex];
-                        if (activeLine.words) {
-                            const wordSpans = activeLine.element.querySelectorAll('.elrc-word');
-                            activeLine.words.forEach((w, i) => {
-                                if (ct >= w.time - lyricHighlightLead) {
-                                    if (wordSpans[i]) wordSpans[i].classList.add('word-active');
-                                } else {
-                                    if (wordSpans[i]) wordSpans[i].classList.remove('word-active');
-                                }
-                            });
-                        }
-                    }
+                if (video.paused || typeof video.requestVideoFrameCallback !== 'function') {
+                    updateLyricsAtTime(ct);
                 }
 
                 rafPending = false;
@@ -1422,6 +1547,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (videoWrapper) {
         videoWrapper.addEventListener('wheel', (e) => {
             if (e.target.closest('.stop-propagation')) return;
+            if (e.target.closest('#lyrics-display.static-lyrics-mode')) return;
             e.preventDefault();
             const step = 0.05;
             setVolumeLevel(e.deltaY < 0 ? Math.min(1, getVolumeLevel() + step) : Math.max(0, getVolumeLevel() - step));
@@ -1499,7 +1625,13 @@ document.addEventListener("DOMContentLoaded", () => {
             lastTapTime = now; lastTapRegion = tapRegion;
         } else {
             lastTapTime = now; lastTapRegion = tapRegion;
-            clickTimeout = setTimeout(() => { togglePlay(); showCenterPlayPause(); lastTapTime = 0; }, 300);
+            clickTimeout = setTimeout(() => {
+                if (lyricsContainer.classList.contains('hidden')) {
+                    togglePlay();
+                    showCenterPlayPause();
+                }
+                lastTapTime = 0;
+            }, 300);
         }
     });
 
@@ -1659,6 +1791,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Auto-hide UI
     function resetHideControlsTimer() {
         controls.forEach(c => c.classList.remove('hide'));
+        lyricsTopControls.classList.remove('hide');
+        lyricsHeader.classList.remove('hide');
         if (playerContainer) playerContainer.style.cursor = 'default';
         clearTimeout(hideControlsTimeout);
         hideControlsTimeout = setTimeout(() => {
@@ -1668,14 +1802,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (playerContainer) playerContainer.style.cursor = 'none';
 
                 if (lyricsOpen) {
-                    const lh = document.querySelector('.lyrics-header');
-                    if (lh) lh.style.opacity = '0';
+                    lyricsHeader.classList.add('hide');
+                    lyricsTopControls.classList.add('hide');
                 }
             }
         }, 3000);
-
-        const lh = document.querySelector('.lyrics-header');
-        if (lh) lh.style.opacity = '1';
     }
 
     if (playerContainer) { playerContainer.addEventListener('pointermove', resetHideControlsTimer); playerContainer.addEventListener('click', resetHideControlsTimer); }

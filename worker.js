@@ -45,9 +45,21 @@ self.onmessage = async (e) => {
 // Align manual lyrics to recognized words inside timestamped speech segments.
 function alignUserLyricsToAI(aiOutput, userLines) {
     const result = Array.isArray(aiOutput) ? aiOutput[0] : aiOutput;
-    const chunks = (result && result.chunks ? result.chunks : [])
-        .filter(chunk => Array.isArray(chunk.timestamp) && Number.isFinite(chunk.timestamp[0]) && Number.isFinite(chunk.timestamp[1]));
-    if (!chunks.length) throw new Error('The speech model returned no timestamped speech segments.');
+    const rawSegments = Array.isArray(result?.segments) ? result.segments : (Array.isArray(result?.chunks) ? result.chunks : []);
+    const chunks = rawSegments
+        .filter(segment => Array.isArray(segment.timestamp) && Number.isFinite(segment.timestamp[0]) && Number.isFinite(segment.timestamp[1]))
+        .map(segment => ({ ...segment, timestamp: [Number(segment.timestamp[0]), Number(segment.timestamp[1])] }));
+
+    if (!chunks.length) {
+        const fallbackSegments = Array.isArray(result?.chunks) ? result.chunks : [];
+        const fallbackChunks = fallbackSegments
+            .filter(segment => Array.isArray(segment.timestamp) && Number.isFinite(segment.timestamp[0]) && Number.isFinite(segment.timestamp[1]))
+            .map(segment => ({ ...segment, timestamp: [Number(segment.timestamp[0]), Number(segment.timestamp[1])] }));
+        if (!fallbackChunks.length) {
+            throw new Error('The speech model returned no timestamped speech segments. Try a cleaner vocal track or add manual timestamps.');
+        }
+        chunks.push(...fallbackChunks);
+    }
 
     const tokenize = text => (text.toLowerCase().normalize('NFKC').match(/[\p{L}\p{N}]+/gu) || []);
     const recognizedWords = [];
