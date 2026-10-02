@@ -83,6 +83,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const musicArtBg = document.getElementById('music-art-bg');
     const musicArtImg = document.getElementById('music-art-img');
     const defaultMusicIcon = document.getElementById('default-music-icon');
+    const lofiControls = document.getElementById('lofi-controls');
+    const btnLofiToggle = document.getElementById('btn-lofi-toggle');
+    const lofiEffectsPanel = document.getElementById('lofi-effects-panel');
+    const lofiSpeedSlider = document.getElementById('lofi-speed-slider');
+    const lofiSpeedValue = document.getElementById('lofi-speed-value');
+    const lofiReverbSlider = document.getElementById('lofi-reverb-slider');
+    const lofiReverbValue = document.getElementById('lofi-reverb-value');
+    const lofiEffectsStatus = document.getElementById('lofi-effects-status');
 
     // Lyrics Elements
     const btnToggleLyrics = document.getElementById('btn-toggle-lyrics');
@@ -124,6 +132,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // File Variables
     let currentFile = null;
     let currentFileHandle = null;
+    let lofiAudioContext = null;
+    let lofiDryGain = null;
+    let lofiReverbGain = null;
     let currentTags = {};
     let currentPictureData = null;
     let currentPictureFormat = null;
@@ -401,6 +412,178 @@ document.addEventListener("DOMContentLoaded", () => {
     function isSupportedMediaFile(file) {
         return isVideoFile(file) || (appSettings.musicMode && isAudioFile(file));
     }
+
+    function setLofiEffectsStatus(message) {
+        lofiEffectsStatus.textContent = message;
+    }
+
+    function updateLofiReverbMix(amount) {
+        if (!lofiAudioContext || !lofiDryGain || !lofiReverbGain) return;
+        const mix = Math.max(0, Math.min(1, amount));
+        const intensity = mix * 1.5;
+        const now = lofiAudioContext.currentTime;
+        const baseIntensity = Math.min(intensity, 1);
+        const extraIntensity = Math.max(0, intensity - 1);
+        const wet = intensity <= 1
+            ? Math.sin(intensity * Math.PI / 2) * 0.78
+            : 0.78 + extraIntensity * 0.78;
+        const dry = Math.max(0.6, 1 - baseIntensity * 0.2 - extraIntensity * 0.4);
+        lofiDryGain.setTargetAtTime(dry, now, 0.06);
+        lofiReverbGain.setTargetAtTime(wet, now, 0.06);
+    }
+
+    let lofiAudioInitPromise = null;
+    async function ensureLofiAudioGraph() {
+        if (lofiAudioContext) {
+            if (lofiAudioContext.state === 'suspended') await lofiAudioContext.resume();
+            return;
+        }
+        if (lofiAudioInitPromise) return lofiAudioInitPromise;
+
+        const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextConstructor) throw new Error('Web Audio is not supported in this browser.');
+
+        const context = new AudioContextConstructor({ latencyHint: 'playback' });
+        lofiAudioContext = context;
+        lofiAudioInitPromise = (async () => {
+            let source = null;
+            try {
+                const dryGain = context.createGain();
+                const reverbSend = context.createGain();
+                const convolver = context.createConvolver();
+                const damping = context.createBiquadFilter();
+                const wetGain = context.createGain();
+                const limiter = context.createDynamicsCompressor();
+                damping.type = 'lowpass';
+                damping.frequency.value = 9000;
+                convolver.normalize = false;
+                wetGain.gain.value = 0;
+                limiter.threshold.value = -3;
+                limiter.knee.value = 6;
+                limiter.ratio.value = 4;
+                limiter.attack.value = 0.01;
+                limiter.release.value = 0.2;
+
+                const impulseLength = Math.floor(context.sampleRate * 1.4);
+                const impulse = context.createBuffer(1, impulseLength, context.sampleRate);
+                for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
+                    const samples = impulse.getChannelData(channel);
+                    let energy = 0;
+                    for (let index = 0; index < impulseLength; index++) {
+                        const decay = Math.exp(-index / (context.sampleRate * 0.55));
+                        const fadeIn = Math.min(1, index / (context.sampleRate * 0.008));
+                        const sample = (Math.random() * 2 - 1) * decay * fadeIn;
+                        samples[index] = sample;
+                        energy += sample * sample;
+                    }
+                    const gain = energy > 0 ? 0.5 / Math.sqrt(energy) : 0;
+                    for (let index = 0; index < impulseLength; index++) samples[index] *= gain;
+                }
+                convolver.buffer = impulse;
+
+                source = context.createMediaElementSource(video);
+                source.connect(dryGain);
+                dryGain.connect(limiter);
+                source.connect(reverbSend);
+                reverbSend.connect(convolver);
+                convolver.connect(damping);
+                damping.connect(wetGain);
+                wetGain.connect(limiter);
+                limiter.connect(context.destination);
+                lofiDryGain = dryGain.gain;
+                lofiReverbGain = wetGain.gain;
+                await context.resume();
+            } catch (error) {
+                if (source) {
+                    source.disconnect();
+                    source.connect(context.destination);
+                }
+                lofiAudioContext = null;
+                lofiDryGain = null;
+                lofiReverbGain = null;
+                throw error;
+            }
+        })();
+
+        try {
+            await lofiAudioInitPromise;
+        } finally {
+            lofiAudioInitPromise = null;
+        }
+    }
+
+    let lofiIdleTimeout;
+    function showLofiEffectsPanel() {
+        clearTimeout(lofiIdleTimeout);
+        lofiEffectsPanel.classList.remove('idle');
+        lofiEffectsPanel.setAttribute('aria-hidden', 'false');
+        lofiIdleTimeout = setTimeout(() => {
+            lofiEffectsPanel.classList.add('idle');
+            lofiEffectsPanel.setAttribute('aria-hidden', 'true');
+        }, 4000);
+    }
+
+    btnLofiToggle.addEventListener('click', () => {
+        if (btnLofiToggle.classList.contains('active') && lofiEffectsPanel.classList.contains('idle')) {
+            showLofiEffectsPanel();
+            return;
+        }
+
+        const isEnabled = btnLofiToggle.classList.toggle('active');
+        lofiEffectsPanel.classList.toggle('hidden', !isEnabled);
+        btnLofiToggle.setAttribute('aria-expanded', String(isEnabled));
+        clearTimeout(lofiIdleTimeout);
+        if (isEnabled) {
+            showLofiEffectsPanel();
+        } else {
+            lofiEffectsPanel.classList.remove('idle');
+            lofiEffectsPanel.setAttribute('aria-hidden', 'true');
+        }
+        lofiSpeedSlider.value = isEnabled ? '0.9' : '1';
+        lofiSpeedSlider.dispatchEvent(new Event('input', { bubbles: true }));
+        lofiReverbSlider.value = isEnabled ? '75' : '0';
+        lofiReverbSlider.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    lofiEffectsPanel.addEventListener('pointerdown', showLofiEffectsPanel);
+    lofiEffectsPanel.addEventListener('input', showLofiEffectsPanel);
+    document.addEventListener('click', event => {
+        if (!lofiControls.contains(event.target) && !lofiEffectsPanel.classList.contains('hidden')) {
+            clearTimeout(lofiIdleTimeout);
+            lofiEffectsPanel.classList.add('idle');
+            lofiEffectsPanel.setAttribute('aria-hidden', 'true');
+        }
+    }, true);
+
+    lofiSpeedSlider.addEventListener('input', () => {
+        const rate = parseFloat(lofiSpeedSlider.value);
+        video.playbackRate = rate;
+        currentSpeed = rate;
+        btnSpeed.textContent = `${rate}x`;
+        if ('preservesPitch' in video) video.preservesPitch = rate === 1;
+        if ('mozPreservesPitch' in video) video.mozPreservesPitch = rate === 1;
+        if ('webkitPreservesPitch' in video) video.webkitPreservesPitch = rate === 1;
+        lofiSpeedValue.textContent = `${rate.toFixed(2)}x`;
+        setLofiEffectsStatus('');
+    });
+
+    lofiReverbSlider.addEventListener('input', async () => {
+        const amount = parseFloat(lofiReverbSlider.value) / 100;
+        lofiReverbValue.textContent = `${Math.round(amount * 100)}%`;
+        if (amount === 0 && !lofiAudioContext) {
+            setLofiEffectsStatus('');
+            return;
+        }
+
+        try {
+            await ensureLofiAudioGraph();
+            updateLofiReverbMix(amount);
+            setLofiEffectsStatus('');
+        } catch (error) {
+            console.error('Could not apply Lo-Fi reverb:', error);
+            setLofiEffectsStatus(`Reverb unavailable: ${error.message}`);
+        }
+    });
 
     function renderFileManagerList() {
         dropZone.classList.add('hidden');
@@ -745,10 +928,37 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!file) return;
         const isVideo = isVideoFile(file);
         const isAudio = isAudioFile(file);
+        const wasAudioPlaying = isAudioPlaying;
 
         currentFile = file;
         currentFileHandle = handle;
         isAudioPlaying = isAudio;
+        lofiControls.classList.toggle('hidden', !isAudio);
+        if (isAudio) {
+            currentSpeed = video.playbackRate;
+            btnSpeed.textContent = `${video.playbackRate}x`;
+            lofiSpeedSlider.value = video.playbackRate;
+            lofiSpeedValue.textContent = `${video.playbackRate.toFixed(2)}x`;
+            if ('preservesPitch' in video) video.preservesPitch = video.playbackRate === 1;
+            if ('mozPreservesPitch' in video) video.mozPreservesPitch = video.playbackRate === 1;
+            if ('webkitPreservesPitch' in video) video.webkitPreservesPitch = video.playbackRate === 1;
+            if (lofiReverbGain && lofiAudioContext) {
+                const reverbAmount = parseFloat(lofiReverbSlider.value) / 100;
+                updateLofiReverbMix(reverbAmount);
+            }
+        } else if (wasAudioPlaying) {
+            video.playbackRate = 1;
+            currentSpeed = 1;
+            btnSpeed.textContent = '1x';
+            if ('preservesPitch' in video) video.preservesPitch = true;
+            if ('mozPreservesPitch' in video) video.mozPreservesPitch = true;
+            if ('webkitPreservesPitch' in video) video.webkitPreservesPitch = true;
+            lofiSpeedSlider.value = 1;
+            lofiSpeedValue.textContent = '1.00x';
+        }
+        if (!isAudio && lofiReverbGain && lofiAudioContext) {
+            updateLofiReverbMix(0);
+        }
 
         currentTags = {};
         currentPictureData = null;
@@ -1027,6 +1237,7 @@ document.addEventListener("DOMContentLoaded", () => {
         controls.forEach(control => control.classList.add('hide'));
         lyricsTopControls.classList.add('hide');
         lyricsHeader.classList.add('hide');
+        lofiControls.classList.add('hide');
         lyricsFontMenu.classList.add('hidden');
         dismissResumeToast();
         if (playerContainer) playerContainer.style.cursor = 'none';
@@ -1785,6 +1996,13 @@ document.addEventListener("DOMContentLoaded", () => {
             const speeds = [1, 1.25, 1.5, 2, 3];
             currentSpeed = speeds[(speeds.indexOf(currentSpeed) + 1) % speeds.length];
             video.playbackRate = currentSpeed; btnSpeed.textContent = currentSpeed + 'x';
+            if (isAudioPlaying) {
+                lofiSpeedSlider.value = currentSpeed;
+                lofiSpeedValue.textContent = `${currentSpeed.toFixed(2)}x`;
+                if ('preservesPitch' in video) video.preservesPitch = currentSpeed === 1;
+                if ('mozPreservesPitch' in video) video.mozPreservesPitch = currentSpeed === 1;
+                if ('webkitPreservesPitch' in video) video.webkitPreservesPitch = currentSpeed === 1;
+            }
         });
     }
 
@@ -1793,6 +2011,7 @@ document.addEventListener("DOMContentLoaded", () => {
         controls.forEach(c => c.classList.remove('hide'));
         lyricsTopControls.classList.remove('hide');
         lyricsHeader.classList.remove('hide');
+        lofiControls.classList.remove('hide');
         if (playerContainer) playerContainer.style.cursor = 'default';
         clearTimeout(hideControlsTimeout);
         hideControlsTimeout = setTimeout(() => {
@@ -1804,6 +2023,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (lyricsOpen) {
                     lyricsHeader.classList.add('hide');
                     lyricsTopControls.classList.add('hide');
+                    lofiControls.classList.add('hide');
                 }
             }
         }, 3000);

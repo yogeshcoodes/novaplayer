@@ -185,6 +185,26 @@
                             Auto
                         </button>
                     </div>
+                    <div class="lofi-controls stop-propagation hidden" id="lofi-controls">
+                        <button class="btn outline-btn small-btn lofi-toggle" id="btn-lofi-toggle" type="button"
+                            aria-expanded="false" aria-controls="lofi-effects-panel">LOFI</button>
+                        <div class="lofi-effects-panel hidden" id="lofi-effects-panel">
+                            <div class="lofi-effect-control" id="lofi-speed-control">
+                                <label for="lofi-speed-slider">
+                                    <span>Speed &amp; Pitch</span><output id="lofi-speed-value">1.00x</output>
+                                </label>
+                                <input type="range" id="lofi-speed-slider" min="0.5" max="1.5" value="0.9" step="0.01">
+                            </div>
+                            <div class="lofi-effect-control" id="lofi-reverb-control">
+                                <label for="lofi-reverb-slider">
+                                    <span>Reverb</span><output id="lofi-reverb-value">75%</output>
+                                </label>
+                                <input type="range" id="lofi-reverb-slider" min="0" max="100" value="75" step="1">
+                            </div>
+                            <div class="lofi-effects-status" id="lofi-effects-status" role="status"
+                                aria-live="polite"></div>
+                        </div>
+                    </div>
                     <div class="lyrics-header stop-propagation">
                         <button class="icon-btn close-lyrics tooltip" data-tooltip="Lyrics font" id="btn-lyrics-font"
                             aria-label="Lyrics font"><span class="material-symbols-outlined">edit_note</span></button>
