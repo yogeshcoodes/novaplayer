@@ -1789,6 +1789,7 @@ document.addEventListener("DOMContentLoaded", () => {
         videoWrapper.addEventListener('pointerdown', (e) => {
             if (e.button !== 0 && e.pointerType === 'mouse') return;
             if (e.target.closest('.stop-propagation')) return;
+            if (e.target.closest('#lyrics-display.static-lyrics-mode')) return;
 
             const isPanelOpen = (!cropPanel.classList.contains('hidden') || !settingsPanel.classList.contains('hidden'));
             if (isPanelOpen) return;
