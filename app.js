@@ -114,7 +114,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const lyricsBgUpload = document.getElementById('lyrics-bg-upload');
     const lyricsPingPongToggle = document.getElementById('setting-lyrics-ping-pong');
     const btnAutoFetchLyrics = document.getElementById('btn-auto-fetch-lyrics');
-    const btnAiAlign = document.getElementById('btn-ai-align');
     const btnPreviewLyrics = document.getElementById('btn-preview-lyrics');
     const autoLyricsToggle = document.getElementById('setting-auto-lyrics');
     const btnPreviousTrack = document.getElementById('btn-previous-track');
@@ -139,9 +138,11 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentPictureData = null;
     let currentPictureFormat = null;
     let currentLyrics = null;
+    let lyricsEditorDraft = null;
     let lyricsMetadataReady = true;
     let autoLyricsLookupFileKey = null;
     let customLyricsBgUrl = null;
+    let customLyricsBgIsImage = false;
     let pendingLyricsBgUrl = null;
     let pingPongRunId = 0;
 
@@ -156,62 +157,6 @@ document.addEventListener("DOMContentLoaded", () => {
     let bgVideos = ['assets/aesthetic.mp4', 'assets/lofi.mp4', 'assets/sans.mp4'];
     let currentLyricsThemeIdx = 0;
     let currentLyricsFont = 'default';
-
-    // --- Web Worker Setup for Background AI ---
-    let aiWorker = null;
-    let aiWorkerAvailable = false;
-    try {
-        aiWorker = new Worker('worker.js', { type: 'module' });
-        aiWorkerAvailable = true;
-    } catch (error) {
-        console.warn('AI worker could not start. Open NovaPlayer over HTTP to enable local AI.', error);
-    }
-
-    function setAiStatus(message, type = 'error') {
-        const box = document.getElementById('ai-align-status');
-        if (!box) return;
-        box.textContent = message;
-        box.className = `ai-align-status visible ${type}`;
-    }
-
-    function clearAiStatus() {
-        const box = document.getElementById('ai-align-status');
-        if (!box) return;
-        box.textContent = '';
-        box.className = 'ai-align-status hidden';
-    }
-
-    if (aiWorker) aiWorker.onmessage = (e) => {
-        const { status, message } = e.data;
-
-        if (status === 'loading' || status === 'processing') {
-            btnAiAlign.innerHTML = `<span class="material-symbols-outlined">auto_fix_high</span> ${message}`;
-            clearAiStatus();
-        } else if (status === 'success_aligned') {
-            lyricsInput.value = e.data.lrc;
-            lyricsEditor.classList.remove('hidden');
-            lyricsDisplay.classList.add('hidden');
-            lyricsEmptyState.classList.add('hidden');
-            setAiStatus('Lyrics aligned successfully. Review them and choose View / Play or Save to File.', 'success');
-            resetAiAlignButton();
-        } else if (status === 'error') {
-            console.error(message);
-            setAiStatus(message, 'error');
-            resetAiAlignButton();
-        }
-    };
-
-    if (aiWorker) aiWorker.onerror = (event) => {
-        aiWorkerAvailable = false;
-        console.error('AI worker failed to load:', event.message);
-        setAiStatus('Speech alignment worker failed to load. Retry or open the app over HTTP.', 'error');
-        resetAiAlignButton();
-    };
-
-    function resetAiAlignButton() {
-        btnAiAlign.innerHTML = `<span class="material-symbols-outlined">auto_fix_high</span> Sync My Text`;
-        btnAiAlign.disabled = false;
-    }
 
     setTimeout(() => {
         if (splashScreen) {
@@ -989,6 +934,7 @@ document.addEventListener("DOMContentLoaded", () => {
         currentPictureData = null;
         currentPictureFormat = null;
         currentLyrics = null;
+        lyricsEditorDraft = null;
         lyricsMetadataReady = !(isAudio && window.jsmediatags);
         autoLyricsLookupFileKey = null;
         syncedLyricsData = [];
@@ -1104,11 +1050,23 @@ document.addEventListener("DOMContentLoaded", () => {
         lyricsContainer.classList.remove(...lyricsThemes);
         lyricsContainer.classList.add(lyricsThemes[currentLyricsThemeIdx]);
 
-        const backgroundSource = customLyricsBgUrl || bgVideos[currentLyricsThemeIdx];
-        if (lyricsBgVideo.src !== new URL(backgroundSource, document.baseURI).href) {
-            lyricsBgVideo.src = backgroundSource;
+        if (customLyricsBgIsImage && customLyricsBgUrl) {
+            lyricsContainer.style.backgroundImage = `url("${customLyricsBgUrl}")`;
+            lyricsContainer.style.backgroundSize = 'cover';
+            lyricsContainer.style.backgroundPosition = 'center';
+            lyricsBgVideo.pause();
+            lyricsBgVideo.removeAttribute('src');
+            lyricsBgVideo.load();
+        } else {
+            lyricsContainer.style.backgroundImage = '';
+            lyricsContainer.style.backgroundSize = '';
+            lyricsContainer.style.backgroundPosition = '';
+            const backgroundSource = customLyricsBgUrl || bgVideos[currentLyricsThemeIdx];
+            if (lyricsBgVideo.src !== new URL(backgroundSource, document.baseURI).href) {
+                lyricsBgVideo.src = backgroundSource;
+            }
+            updateLyricsBackgroundPlayback();
         }
-        updateLyricsBackgroundPlayback();
 
         const names = ['Aesthetic', 'Lo-Fi', 'Sans'];
         btnLyricsTheme.innerHTML = `<span class="material-symbols-outlined" style="font-size: 16px;">palette</span> ${names[currentLyricsThemeIdx]}`;
@@ -1136,6 +1094,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function updateLyricsBackgroundPlayback() {
         pingPongRunId++;
         lyricsBgVideo.pause();
+        if (customLyricsBgIsImage && customLyricsBgUrl) return;
         lyricsBgVideo.loop = !appSettings.lyricsPingPong;
         if (appSettings.lyricsPingPong && lyricsBgVideo.ended) lyricsBgVideo.currentTime = 0;
         lyricsBgVideo.play().catch(() => { });
@@ -1189,9 +1148,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnAddLyricsBgAnyway = document.getElementById('btn-add-lyrics-bg-anyway');
     const btnCancelLyricsBg = document.getElementById('btn-cancel-lyrics-bg');
 
-    function applyCustomLyricsBackground(url) {
+    function applyCustomLyricsBackground(url, isImage = false) {
         if (customLyricsBgUrl) URL.revokeObjectURL(customLyricsBgUrl);
         customLyricsBgUrl = url;
+        customLyricsBgIsImage = isImage;
         pendingLyricsBgUrl = null;
         lyricsBgWarning.classList.add('hidden');
         updateLyricsTheme();
@@ -1209,17 +1169,28 @@ document.addEventListener("DOMContentLoaded", () => {
     btnCancelLyricsBg.addEventListener('click', cancelPendingLyricsBackground);
 
     function loadCustomLyricsBackground(file) {
-        if (!file || !file.type.startsWith('video/')) {
-            alert('Choose a video file for the lyrics background.');
+        if (!file || (!file.type.startsWith('video/') && !file.type.startsWith('image/'))) {
+            alert('Choose an image or video file for the lyrics background.');
             return;
         }
         cancelPendingLyricsBackground();
         const sizeInMb = file.size / (1024 * 1024);
         if (sizeInMb > 500) {
-            alert('Lyrics background videos must be 500 MB or smaller.');
+            alert('Lyrics background images and videos must be 500 MB or smaller.');
             return;
         }
         const candidateUrl = URL.createObjectURL(file);
+        if (file.type.startsWith('image/')) {
+            const image = new Image();
+            image.onload = () => applyCustomLyricsBackground(candidateUrl, true);
+            image.onerror = () => {
+                URL.revokeObjectURL(candidateUrl);
+                alert('This image could not be opened as a lyrics background.');
+            };
+            image.src = candidateUrl;
+            return;
+        }
+
         const probe = document.createElement('video');
         probe.preload = 'metadata';
         probe.onloadedmetadata = () => {
@@ -1301,12 +1272,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
     btnCloseLyrics.addEventListener('click', event => {
         event.stopPropagation();
+        lyricsEditorDraft = lyricsInput.value;
+        const text = lyricsInput.value.trim() || getCurrentLyrics();
+        lyricsEditor.classList.add('hidden');
+        lyricsFontMenu.classList.add('hidden');
+        if (text) {
+            renderLyricsToDisplay(text);
+            lyricsDisplay.classList.remove('hidden');
+            lyricsEmptyState.classList.add('hidden');
+        } else {
+            lyricsDisplay.classList.add('hidden');
+            lyricsEmptyState.classList.remove('hidden');
+        }
         controls.forEach(control => control.classList.add('hide'));
         lyricsTopControls.classList.add('hide');
         lyricsHeader.classList.add('hide');
         lofiControls.classList.add('hide');
-        lyricsFontMenu.classList.add('hidden');
-        dismissResumeToast();
         if (playerContainer) playerContainer.style.cursor = 'none';
         clearTimeout(hideControlsTimeout);
     });
@@ -1334,6 +1315,7 @@ document.addEventListener("DOMContentLoaded", () => {
     btnPreviewLyrics.addEventListener('click', () => {
         const text = lyricsInput.value.trim();
         if (!text) return;
+        lyricsEditorDraft = lyricsInput.value;
         renderLyricsToDisplay(text);
         lyricsEditor.classList.add('hidden');
         lyricsEmptyState.classList.add('hidden');
@@ -1345,7 +1327,7 @@ document.addEventListener("DOMContentLoaded", () => {
         lyricsDisplay.classList.add('hidden');
         lyricsEmptyState.classList.add('hidden');
         lyricsEditor.classList.remove('hidden');
-        lyricsInput.value = getCurrentLyrics() || '';
+        lyricsInput.value = lyricsEditorDraft !== null ? lyricsEditorDraft : (getCurrentLyrics() || '');
         lyricsInput.focus();
     });
 
@@ -1353,6 +1335,7 @@ document.addEventListener("DOMContentLoaded", () => {
         videoWrapper.classList.remove('static-lyrics-scroll');
         lyricsEmptyState.classList.add('hidden');
         lyricsEditor.classList.remove('hidden');
+        lyricsEditorDraft = '';
         lyricsInput.value = '';
         lyricsInput.focus();
     });
@@ -1436,6 +1419,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     localStorage.setItem(`${requestedFileKey}_lyrics`, fetchedText);
                     if (currentFile === requestedFile && fileKey === requestedFileKey) {
                         currentLyrics = fetchedText;
+                        lyricsEditorDraft = null;
                         lyricsInput.value = fetchedText;
                         renderLyricsToDisplay(fetchedText);
                         lyricsEditor.classList.add('hidden');
@@ -1481,37 +1465,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     btnAutoFetchLyrics.addEventListener('click', () => fetchLyricsForCurrentTrack());
 
-    btnAiAlign.addEventListener('click', async () => {
-        clearAiStatus();
-        if (!currentFile) return;
-        if (!aiWorkerAvailable) {
-            setAiStatus('The AI worker is unavailable. Open the app over HTTP to enable local AI.', 'error');
-            return;
-        }
-        const userLines = lyricsInput.value.split(/\r?\n/)
-            .map(line => line.replace(/^\s*\[\d{2,}:\d{2}(?:[.:]\d{1,3})?\]\s*/, '').trim())
-            .filter(Boolean);
-        if (!userLines.length) {
-            setAiStatus('Enter or fetch the lyrics first, then use Sync My Text.', 'error');
-            return;
-        }
-
-        btnAiAlign.disabled = true;
-        btnAiAlign.innerHTML = `<span class="material-symbols-outlined">memory</span> Preparing Audio...`;
-        try {
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-            const audioBuffer = await audioContext.decodeAudioData(await currentFile.arrayBuffer());
-            const audioData = audioBuffer.getChannelData(0);
-            aiWorker.postMessage({ type: 'align', audioData, userLines });
-            await audioContext.close();
-        } catch (error) {
-            console.error(error);
-            setAiStatus('Audio decode failed: ' + error.message, 'error');
-            btnAiAlign.disabled = false;
-            btnAiAlign.innerHTML = `<span class="material-symbols-outlined">auto_fix_high</span> Sync My Text`;
-        }
-    });
-
     // Write to file exactly in place without downloads or duplicating
     btnSaveLyrics.addEventListener('click', async () => {
         const text = lyricsInput.value.trim();
@@ -1521,6 +1474,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!currentFile.name.toLowerCase().endsWith('.mp3')) {
             localStorage.setItem(`${fileKey}_lyrics`, text);
             currentLyrics = text;
+            lyricsEditorDraft = null;
             lyricsEditor.classList.add('hidden');
             renderLyricsToDisplay(text);
             lyricsDisplay.classList.remove('hidden');
@@ -1592,6 +1546,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!isPaused) video.play().catch(() => { });
 
             currentLyrics = text;
+            lyricsEditorDraft = null;
             lyricsEditor.classList.add('hidden');
             renderLyricsToDisplay(text);
             lyricsDisplay.classList.remove('hidden');

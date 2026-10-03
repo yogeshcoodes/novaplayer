@@ -37,7 +37,7 @@
         <input type="file" id="video-upload" accept="video/*" multiple class="hidden">
         <input type="file" id="folder-upload" webkitdirectory directory class="hidden">
         <input type="file" id="sub-upload" accept=".vtt,.srt" class="hidden">
-        <input type="file" id="lyrics-bg-upload" accept="video/*" class="hidden">
+        <input type="file" id="lyrics-bg-upload" accept="video/*,image/*" class="hidden">
 
         <!-- Settings Panel -->
         <div id="settings-panel" class="side-panel hidden stop-propagation">
@@ -207,13 +207,13 @@
                     <div class="lyrics-header stop-propagation">
                         <button class="icon-btn close-lyrics tooltip" data-tooltip="Lyrics font" id="btn-lyrics-font"
                             aria-label="Lyrics font"><span class="material-symbols-outlined">edit_note</span></button>
-                        <button class="icon-btn close-lyrics tooltip" data-tooltip="Choose background video"
+                        <button class="icon-btn close-lyrics tooltip" data-tooltip="Choose background image or video"
                             id="btn-lyrics-bg-upload" aria-label="Choose background video"><span
                                 class="material-symbols-outlined">video_library</span></button>
                         <button class="icon-btn close-lyrics tooltip" data-tooltip="Edit Lyrics"
                             id="btn-edit-lyrics"><span class="material-symbols-outlined">edit</span></button>
-                        <button class="icon-btn close-lyrics tooltip" data-tooltip="Hide controls"
-                            aria-label="Hide controls" id="btn-close-lyrics"><span
+                        <button class="icon-btn close-lyrics tooltip" data-tooltip="Close lyrics"
+                            aria-label="Close lyrics" id="btn-close-lyrics"><span
                                 class="material-symbols-outlined">close</span></button>
                     </div>
 
@@ -249,14 +249,9 @@
                             <button class="btn outline-btn" id="btn-auto-fetch-lyrics" title="Search online database">
                                 <span class="material-symbols-outlined">cloud_download</span> Database
                             </button>
-                            <button class="btn outline-btn" id="btn-ai-align"
-                                title="Take my exact text and sync timestamps to audio!">
-                                <span class="material-symbols-outlined">auto_fix_high</span> Sync My Text
-                            </button>
                         </div>
-                        <div id="ai-align-status" class="ai-align-status hidden" role="status" aria-live="polite"></div>
                         <textarea id="lyrics-input"
-                            placeholder="Paste lyrics in any language (English, Hindi, Chinese, etc.).&#10;&#10;Click 'Sync My Text' to automatically attach timestamps to your words, or click 'View Lyrics' to see them instantly!"></textarea>
+                            placeholder="Paste lyrics in any language. Add timestamps in [mm:ss.xx] format for automatic playback sync, or click 'View Lyrics' to see them instantly."></textarea>
 
                         <div class="editor-bottom-actions">
                             <button class="btn outline-btn" id="btn-preview-lyrics">
