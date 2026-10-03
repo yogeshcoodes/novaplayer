@@ -110,6 +110,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnLyricsModeToggle = document.getElementById('btn-lyrics-mode-toggle');
     const btnLyricsFont = document.getElementById('btn-lyrics-font');
     const lyricsFontMenu = document.getElementById('lyrics-font-menu');
+    const lyricsFontUpload = document.getElementById('lyrics-font-upload');
+    const btnUploadLyricsFont = document.getElementById('btn-upload-lyrics-font');
+    const lyricsFontSize = document.getElementById('lyrics-font-size');
+    const lyricsFontSizeValue = document.getElementById('lyrics-font-size-value');
     const btnLyricsBgUpload = document.getElementById('btn-lyrics-bg-upload');
     const lyricsBgUpload = document.getElementById('lyrics-bg-upload');
     const lyricsPingPongToggle = document.getElementById('setting-lyrics-ping-pong');
@@ -153,10 +157,65 @@ document.addEventListener("DOMContentLoaded", () => {
     const lyricIdleTimeout = 10;
 
     let fmFilesMap = new Map();
-    let lyricsThemes = ['theme-aesthetic', 'theme-lofi', 'theme-sans'];
-    let bgVideos = ['assets/aesthetic.mp4', 'assets/lofi.mp4', 'assets/sans.mp4'];
+    let lyricsThemes = ['theme-aesthetic', 'theme-lofi', 'theme-lofi2', 'theme-lofi3'];
+    let lyricsBackgrounds = [
+        { source: 'assets/aesthetic.mp4', isImage: false },
+        { source: 'assets/lofi.mp4', isImage: false },
+        { source: 'assets/night.jpg', isImage: true },
+        { source: 'assets/sky.jpg', isImage: true }
+    ];
+    let lyricsThemeFonts = ['cursive', 'lofi', 'brush', 'lofi'];
     let currentLyricsThemeIdx = 0;
     let currentLyricsFont = 'default';
+    let customLyricsFontName = '';
+    let customLyricsFontFace = null;
+
+    const lyricsFontDatabase = new Promise((resolve, reject) => {
+        const request = indexedDB.open('novaplayer-lyrics-fonts', 1);
+        request.onupgradeneeded = () => {
+            if (!request.result.objectStoreNames.contains('fonts')) {
+                request.result.createObjectStore('fonts');
+            }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error('Could not open font storage.'));
+    });
+
+    async function storeCustomLyricsFont(file) {
+        const database = await lyricsFontDatabase;
+        await new Promise((resolve, reject) => {
+            const transaction = database.transaction('fonts', 'readwrite');
+            transaction.objectStore('fonts').put({ blob: file, name: file.name }, 'custom');
+            transaction.oncomplete = resolve;
+            transaction.onerror = () => reject(transaction.error || new Error('Could not save the font.'));
+            transaction.onabort = () => reject(transaction.error || new Error('Font saving was cancelled.'));
+        });
+    }
+
+    async function loadStoredLyricsFont() {
+        const database = await lyricsFontDatabase;
+        return new Promise((resolve, reject) => {
+            const request = database.transaction('fonts', 'readonly').objectStore('fonts').get('custom');
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => reject(request.error || new Error('Could not load the saved font.'));
+        });
+    }
+
+    async function registerCustomLyricsFont(blob, name) {
+        const sourceUrl = URL.createObjectURL(blob);
+        try {
+            const fontFace = await new FontFace('NovaPlayerUploadedLyrics', `url("${sourceUrl}")`).load();
+            if (customLyricsFontFace) document.fonts.delete(customLyricsFontFace);
+            document.fonts.add(fontFace);
+            customLyricsFontFace = fontFace;
+            customLyricsFontName = name;
+            const customOption = lyricsFontMenu.querySelector('[data-lyrics-font="custom"]');
+            customOption.textContent = `Custom: ${name}`;
+            return true;
+        } finally {
+            URL.revokeObjectURL(sourceUrl);
+        }
+    }
 
     setTimeout(() => {
         if (splashScreen) {
@@ -169,7 +228,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 1200);
 
     // --- Settings Setup ---
-    const defaultSettings = { theme: 'dark', amoled: false, resumeAction: 'ask', doubleTapSeek: 10, spaceSpeed: 2.0, musicMode: true, musicModeExplicit: false, lyricsTheme: 1, autoShowLyrics: true, repeatMode: 'off', lyricsPingPong: false, lyricsFont: 'default', lyricsDisplayMode: 'auto' };
+    const defaultSettings = { theme: 'dark', amoled: false, resumeAction: 'ask', doubleTapSeek: 10, spaceSpeed: 2.0, musicMode: true, musicModeExplicit: false, lyricsTheme: 1, autoShowLyrics: true, repeatMode: 'off', lyricsPingPong: false, lyricsFont: 'default', lyricsFontSize: 100, lyricsDisplayMode: 'auto' };
     let appSettings = defaultSettings;
     try {
         const saved = localStorage.getItem('novaSettings');
@@ -206,9 +265,35 @@ document.addEventListener("DOMContentLoaded", () => {
         updateTrackNavigationButtons();
     });
 
-    currentLyricsThemeIdx = appSettings.lyricsTheme || 0;
+    const savedLyricsTheme = Number(appSettings.lyricsTheme);
+    currentLyricsThemeIdx = Number.isInteger(savedLyricsTheme) && savedLyricsTheme >= 0 && savedLyricsTheme < lyricsThemes.length
+        ? savedLyricsTheme
+        : 0;
+    if (appSettings.lyricsFont === 'default') {
+        appSettings.lyricsFont = lyricsThemeFonts[currentLyricsThemeIdx];
+        saveSettings();
+    }
     updateLyricsTheme();
     updateLyricsFont(appSettings.lyricsFont);
+    appSettings.lyricsFontSize = Math.min(150, Math.max(60, Number(appSettings.lyricsFontSize) || 100));
+    updateLyricsFontSize();
+    loadStoredLyricsFont().then(async storedFont => {
+        if (storedFont && storedFont.blob) {
+            await registerCustomLyricsFont(storedFont.blob, storedFont.name || 'Uploaded font');
+            if (appSettings.lyricsFont === 'custom') updateLyricsFont('custom');
+        } else if (appSettings.lyricsFont === 'custom') {
+            appSettings.lyricsFont = 'default';
+            updateLyricsFont('default');
+            saveSettings();
+        }
+    }).catch(error => {
+        console.error('Could not restore the custom lyrics font:', error);
+        if (appSettings.lyricsFont === 'custom') {
+            appSettings.lyricsFont = 'default';
+            updateLyricsFont('default');
+            saveSettings();
+        }
+    });
     updateLyricsDisplayMode();
 
     if (btnLyricsModeToggle) {
@@ -1050,8 +1135,12 @@ document.addEventListener("DOMContentLoaded", () => {
         lyricsContainer.classList.remove(...lyricsThemes);
         lyricsContainer.classList.add(lyricsThemes[currentLyricsThemeIdx]);
 
-        if (customLyricsBgIsImage && customLyricsBgUrl) {
-            lyricsContainer.style.backgroundImage = `url("${customLyricsBgUrl}")`;
+        const background = customLyricsBgUrl
+            ? { source: customLyricsBgUrl, isImage: customLyricsBgIsImage }
+            : lyricsBackgrounds[currentLyricsThemeIdx];
+
+        if (background.isImage) {
+            lyricsContainer.style.backgroundImage = `url("${background.source}")`;
             lyricsContainer.style.backgroundSize = 'cover';
             lyricsContainer.style.backgroundPosition = 'center';
             lyricsBgVideo.pause();
@@ -1061,26 +1150,36 @@ document.addEventListener("DOMContentLoaded", () => {
             lyricsContainer.style.backgroundImage = '';
             lyricsContainer.style.backgroundSize = '';
             lyricsContainer.style.backgroundPosition = '';
-            const backgroundSource = customLyricsBgUrl || bgVideos[currentLyricsThemeIdx];
+            const backgroundSource = background.source;
             if (lyricsBgVideo.src !== new URL(backgroundSource, document.baseURI).href) {
                 lyricsBgVideo.src = backgroundSource;
             }
             updateLyricsBackgroundPlayback();
         }
 
-        const names = ['Aesthetic', 'Lo-Fi', 'Sans'];
+        const names = ['Ambient', 'Lo-Fi', 'Lo-Fi 2', 'Lo-Fi 3'];
         btnLyricsTheme.innerHTML = `<span class="material-symbols-outlined" style="font-size: 16px;">palette</span> ${names[currentLyricsThemeIdx]}`;
     }
 
     function updateLyricsFont(font = appSettings.lyricsFont) {
-        const fonts = ['default', 'vintage', 'typewriter', 'cursive'];
-        currentLyricsFont = fonts.includes(font) ? font : 'default';
+        const fonts = ['default', 'vintage', 'typewriter', 'cursive', 'brush', 'lofi', 'custom'];
+        currentLyricsFont = font === 'default'
+            ? lyricsThemeFonts[currentLyricsThemeIdx]
+            : fonts.includes(font) && (font !== 'custom' || customLyricsFontFace) ? font : lyricsThemeFonts[currentLyricsThemeIdx];
         lyricsContainer.classList.remove(...fonts.map(name => `lyrics-font-${name}`));
         lyricsContainer.classList.add(`lyrics-font-${currentLyricsFont}`);
-        btnLyricsFont.dataset.tooltip = `Lyrics font: ${currentLyricsFont}`;
+        btnLyricsFont.dataset.tooltip = `Lyrics font: ${currentLyricsFont === 'custom' ? customLyricsFontName : currentLyricsFont}`;
         lyricsFontMenu.querySelectorAll('[data-lyrics-font]').forEach(option => {
             option.setAttribute('aria-checked', String(option.dataset.lyricsFont === currentLyricsFont));
         });
+    }
+
+    function updateLyricsFontSize() {
+        const size = Number(appSettings.lyricsFontSize);
+        lyricsContainer.style.setProperty('--lyrics-font-scale', String(size / 100));
+        lyricsFontSize.value = String(size);
+        lyricsFontSizeValue.value = `${size}%`;
+        lyricsFontSizeValue.textContent = `${size}%`;
     }
 
     function updateLyricsDisplayMode() {
@@ -1094,7 +1193,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function updateLyricsBackgroundPlayback() {
         pingPongRunId++;
         lyricsBgVideo.pause();
-        if (customLyricsBgIsImage && customLyricsBgUrl) return;
+        if (customLyricsBgUrl ? customLyricsBgIsImage : lyricsBackgrounds[currentLyricsThemeIdx].isImage) return;
         lyricsBgVideo.loop = !appSettings.lyricsPingPong;
         if (appSettings.lyricsPingPong && lyricsBgVideo.ended) lyricsBgVideo.currentTime = 0;
         lyricsBgVideo.play().catch(() => { });
@@ -1155,6 +1254,12 @@ document.addEventListener("DOMContentLoaded", () => {
         pendingLyricsBgUrl = null;
         lyricsBgWarning.classList.add('hidden');
         updateLyricsTheme();
+    }
+
+    function resetCustomLyricsBackground() {
+        if (customLyricsBgUrl) URL.revokeObjectURL(customLyricsBgUrl);
+        customLyricsBgUrl = null;
+        customLyricsBgIsImage = false;
     }
 
     function cancelPendingLyricsBackground() {
@@ -1219,11 +1324,39 @@ document.addEventListener("DOMContentLoaded", () => {
 
     lyricsFontMenu.querySelectorAll('[data-lyrics-font]').forEach(option => {
         option.addEventListener('click', () => {
+            if (option.dataset.lyricsFont === 'custom' && !customLyricsFontFace) {
+                lyricsFontUpload.click();
+                return;
+            }
             appSettings.lyricsFont = option.dataset.lyricsFont;
             updateLyricsFont(appSettings.lyricsFont);
             saveSettings();
             lyricsFontMenu.classList.add('hidden');
         });
+    });
+
+    btnUploadLyricsFont.addEventListener('click', () => lyricsFontUpload.click());
+    lyricsFontUpload.addEventListener('change', async () => {
+        const file = lyricsFontUpload.files[0];
+        lyricsFontUpload.value = '';
+        if (!file) return;
+        try {
+            await registerCustomLyricsFont(file, file.name);
+            await storeCustomLyricsFont(file);
+            appSettings.lyricsFont = 'custom';
+            updateLyricsFont('custom');
+            saveSettings();
+            lyricsFontMenu.classList.add('hidden');
+        } catch (error) {
+            console.error('Could not load or save the custom lyrics font:', error);
+            alert('This font could not be loaded or saved. Choose a valid TTF, OTF, WOFF, or WOFF2 font file.');
+        }
+    });
+
+    lyricsFontSize.addEventListener('input', () => {
+        appSettings.lyricsFontSize = Number(lyricsFontSize.value);
+        updateLyricsFontSize();
+        saveSettings();
     });
 
     btnLyricsBgUpload.addEventListener('click', () => lyricsBgUpload.click());
@@ -1241,9 +1374,12 @@ document.addEventListener("DOMContentLoaded", () => {
     btnLyricsTheme.addEventListener('click', (e) => {
         e.stopPropagation();
         currentLyricsThemeIdx = (currentLyricsThemeIdx + 1) % lyricsThemes.length;
+        resetCustomLyricsBackground();
         appSettings.lyricsTheme = currentLyricsThemeIdx;
+        appSettings.lyricsFont = lyricsThemeFonts[currentLyricsThemeIdx];
         saveSettings();
         updateLyricsTheme();
+        updateLyricsFont();
     });
 
     btnToggleLyrics.addEventListener('click', () => {

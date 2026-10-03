@@ -38,6 +38,7 @@
         <input type="file" id="folder-upload" webkitdirectory directory class="hidden">
         <input type="file" id="sub-upload" accept=".vtt,.srt" class="hidden">
         <input type="file" id="lyrics-bg-upload" accept="video/*,image/*" class="hidden">
+        <input type="file" id="lyrics-font-upload" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" class="hidden">
 
         <!-- Settings Panel -->
         <div id="settings-panel" class="side-panel hidden stop-propagation">
@@ -177,7 +178,7 @@
 
                     <div class="lyrics-top-controls">
                         <button class="btn outline-btn small-btn lyrics-style-control" id="btn-lyrics-theme">
-                            <span class="material-symbols-outlined" style="font-size: 16px;">palette</span> Aesthetic
+                            <span class="material-symbols-outlined" style="font-size: 16px;">palette</span> Ambient
                         </button>
                         <button class="btn outline-btn small-btn lyrics-show-toggle" id="btn-lyrics-mode-toggle"
                             type="button" aria-pressed="false">
@@ -231,10 +232,17 @@
 
                     <div class="lyrics-font-menu hidden stop-propagation" id="lyrics-font-menu" role="menu"
                         aria-label="Lyrics font">
-                        <button type="button" role="menuitemradio" data-lyrics-font="default">Default</button>
                         <button type="button" role="menuitemradio" data-lyrics-font="vintage">Vintage</button>
                         <button type="button" role="menuitemradio" data-lyrics-font="typewriter">Typewriter</button>
                         <button type="button" role="menuitemradio" data-lyrics-font="cursive">Cursive</button>
+                        <button type="button" role="menuitemradio" data-lyrics-font="brush">Brush</button>
+                        <button type="button" role="menuitemradio" data-lyrics-font="lofi">Lo-Fi</button>
+                        <button type="button" role="menuitemradio" data-lyrics-font="custom">Custom</button>
+                        <button type="button" id="btn-upload-lyrics-font">Upload / Replace Font</button>
+                        <label class="lyrics-font-size-control" for="lyrics-font-size">
+                            <span>Lyrics size <output id="lyrics-font-size-value">100%</output></span>
+                            <input type="range" id="lyrics-font-size" min="60" max="150" value="100" step="5">
+                        </label>
                     </div>
 
                     <!-- Kinetic 2-Line Cinema Stage -->
