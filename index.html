@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NovaPlayer - Premium Media</title>
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
     <link
         href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
         rel="stylesheet" />
@@ -58,6 +59,13 @@
                     <label>Auto-Show Lyrics on Play</label>
                     <label class="toggle-switch">
                         <input type="checkbox" id="setting-auto-lyrics">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label>Auto-find missing lyrics/captions</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="setting-auto-find-lyrics">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -349,6 +357,9 @@
 
                 <div class="controls-row">
                     <div class="controls-left">
+                        <button class="icon-btn tooltip" data-tooltip="Repeat: Off" id="btn-repeat-mode"
+                            aria-label="Repeat: Off" aria-pressed="false"><span class="material-symbols-outlined"
+                                id="repeat-mode-icon">repeat</span></button>
                         <button class="icon-btn tooltip" data-tooltip="Previous track" id="btn-previous-track"
                             aria-label="Previous track" disabled><span
                                 class="material-symbols-outlined">skip_previous</span></button>
@@ -357,6 +368,9 @@
                         <button class="icon-btn tooltip" data-tooltip="Next track" id="btn-next-track"
                             aria-label="Next track" disabled><span
                                 class="material-symbols-outlined">skip_next</span></button>
+                        <button class="icon-btn tooltip" data-tooltip="Fullscreen" id="btn-fullscreen">
+                            <span class="material-symbols-outlined" id="fullscreen-icon">fullscreen</span>
+                        </button>
                     </div>
 
                     <div class="controls-right">
@@ -367,21 +381,25 @@
                         </div>
                         <button class="icon-btn tooltip text-btn" data-tooltip="Playback Speed"
                             id="btn-speed">1x</button>
-                        <button class="icon-btn tooltip" data-tooltip="Repeat: Off" id="btn-repeat-mode"
-                            aria-label="Repeat: Off" aria-pressed="false"><span class="material-symbols-outlined"
-                                id="repeat-mode-icon">repeat</span></button>
                         <button class="icon-btn tooltip" data-tooltip="Lyrics" id="btn-toggle-lyrics">
                             <span class="material-symbols-outlined">lyrics</span>
+                        </button>
+                        <button class="icon-btn tooltip" data-tooltip="Captions" id="btn-toggle-captions"
+                            aria-label="Captions" aria-pressed="false">
+                            <span class="material-symbols-outlined">closed_caption</span>
                         </button>
                         <button class="icon-btn tooltip" data-tooltip="Picture in Picture" id="btn-pip">
                             <span class="material-symbols-outlined">picture_in_picture_alt</span>
                         </button>
-                        <button class="icon-btn tooltip" data-tooltip="Fullscreen" id="btn-fullscreen">
-                            <span class="material-symbols-outlined" id="fullscreen-icon">fullscreen</span>
+                        <button class="icon-btn tooltip" data-tooltip="Hide player controls" id="btn-hide-player-controls"
+                            aria-label="Hide player controls">
+                            <span class="material-symbols-outlined">close</span>
                         </button>
                     </div>
                 </div>
             </div>
+
+            <div id="player-captions" class="hidden" role="status" aria-live="off"></div>
 
             <div id="crop-panel" class="side-panel hidden stop-propagation">
                 <div class="panel-header">

@@ -1,3 +1,10 @@
+if ('serviceWorker' in navigator && window.isSecureContext) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register(new URL('./sw.js', document.baseURI), { scope: './' })
+            .catch(error => console.error('Could not register the NovaPlayer offline cache:', error));
+    }, { once: true });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
     const splashScreen = document.getElementById('splash-screen');
     const appContainer = document.getElementById('app');
@@ -21,6 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const playerContainer = document.getElementById('player-container');
     const videoWrapper = document.getElementById('video-wrapper');
     const video = document.getElementById('main-video');
+    const bottomControls = document.querySelector('.bottom-controls');
     const controls = document.querySelectorAll('.player-controls');
 
     // UI Elements
@@ -55,6 +63,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnFullscreen = document.getElementById('btn-fullscreen');
     const fullscreenIcon = document.getElementById('fullscreen-icon');
     const btnPip = document.getElementById('btn-pip');
+    const btnHidePlayerControls = document.getElementById('btn-hide-player-controls');
+    const btnToggleCaptions = document.getElementById('btn-toggle-captions');
+    const playerCaptions = document.getElementById('player-captions');
     const btnSpeed = document.getElementById('btn-speed');
     const btnCloseVideo = document.getElementById('btn-close-video');
     const videoTitle = document.getElementById('video-title');
@@ -120,13 +131,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnAutoFetchLyrics = document.getElementById('btn-auto-fetch-lyrics');
     const btnPreviewLyrics = document.getElementById('btn-preview-lyrics');
     const autoLyricsToggle = document.getElementById('setting-auto-lyrics');
+    const autoFindLyricsToggle = document.getElementById('setting-auto-find-lyrics');
     const btnPreviousTrack = document.getElementById('btn-previous-track');
     const btnNextTrack = document.getElementById('btn-next-track');
     const btnRepeatMode = document.getElementById('btn-repeat-mode');
     const repeatModeIcon = document.getElementById('repeat-mode-icon');
 
     let currentVideoURL = null, fileKey = null;
-    let hideControlsTimeout;
+    let pipWindow = null;
     let pendingResumeTime = 0;
     let isAudioPlaying = false;
     let currentArtBlobUrl = null;
@@ -143,6 +155,9 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentPictureFormat = null;
     let currentLyrics = null;
     let lyricsEditorDraft = null;
+    let captionCues = [];
+    let captionsEnabled = false;
+    let trackScreenPreference = null;
     let lyricsMetadataReady = true;
     let autoLyricsLookupFileKey = null;
     let customLyricsBgUrl = null;
@@ -228,7 +243,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 1200);
 
     // --- Settings Setup ---
-    const defaultSettings = { theme: 'dark', amoled: false, resumeAction: 'ask', doubleTapSeek: 10, spaceSpeed: 2.0, musicMode: true, musicModeExplicit: false, lyricsTheme: 1, autoShowLyrics: true, repeatMode: 'off', lyricsPingPong: false, lyricsFont: 'default', lyricsFontSize: 100, lyricsDisplayMode: 'auto' };
+    const defaultSettings = { theme: 'dark', amoled: false, resumeAction: 'ask', doubleTapSeek: 10, spaceSpeed: 2.0, musicMode: true, musicModeExplicit: false, lyricsTheme: 1, autoShowLyrics: false, autoFindLyrics: true, repeatMode: 'off', lyricsPingPong: false, lyricsFont: 'default', lyricsFontSize: 100, lyricsDisplayMode: 'auto' };
     let appSettings = defaultSettings;
     try {
         const saved = localStorage.getItem('novaSettings');
@@ -236,6 +251,17 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (e) { appSettings = defaultSettings; }
 
     function saveSettings() { try { localStorage.setItem('novaSettings', JSON.stringify(appSettings)); } catch (e) { } }
+
+    try {
+        if (localStorage.getItem('novaAutoLyricsDefaultOff') !== 'true') {
+            appSettings.autoShowLyrics = false;
+            saveSettings();
+            localStorage.setItem('novaAutoLyricsDefaultOff', 'true');
+        }
+    } catch (error) {
+        appSettings.autoShowLyrics = false;
+        console.error('Could not save the default lyrics setting:', error);
+    }
 
     if (!appSettings.musicModeExplicit) {
         appSettings.musicMode = true;
@@ -353,6 +379,15 @@ document.addEventListener("DOMContentLoaded", () => {
             appSettings.autoShowLyrics = autoLyricsToggle.checked;
             saveSettings();
             if (autoLyricsToggle.checked && !video.paused) ensureLyricsForCurrentTrack();
+        });
+    }
+
+    if (autoFindLyricsToggle) {
+        autoFindLyricsToggle.checked = !!appSettings.autoFindLyrics;
+        autoFindLyricsToggle.addEventListener('change', () => {
+            appSettings.autoFindLyrics = autoFindLyricsToggle.checked;
+            saveSettings();
+            if (autoFindLyricsToggle.checked) ensureLyricsForCurrentTrack();
         });
     }
 
@@ -889,6 +924,110 @@ document.addEventListener("DOMContentLoaded", () => {
         return parsed.sort((a, b) => a.time - b.time);
     }
 
+    function parseSubtitleFile(text) {
+        const blocks = text.replace(/^\uFEFF/, '').replace(/\r/g, '').split(/\n{2,}/);
+        const cues = [];
+        const timestampPattern = /(?:(\d{1,}):)?(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(?:(\d{1,}):)?(\d{2}):(\d{2})[,.](\d{1,3})/;
+
+        blocks.forEach(block => {
+            const lines = block.split('\n');
+            const timestampIndex = lines.findIndex(line => timestampPattern.test(line));
+            if (timestampIndex < 0) return;
+            const match = lines[timestampIndex].match(timestampPattern);
+            if (!match) return;
+
+            const toSeconds = (hours, minutes, seconds, milliseconds) =>
+                (Number(hours || 0) * 3600) + (Number(minutes) * 60) + Number(seconds) +
+                (Number((milliseconds || '').padEnd(3, '0')) / 1000);
+            const decode = document.createElement('textarea');
+            decode.innerHTML = lines.slice(timestampIndex + 1).join('\n').replace(/<[^>]*>/g, '');
+            const captionText = decode.value.trim();
+            if (!captionText) return;
+
+            cues.push({
+                start: toSeconds(match[1], match[2], match[3], match[4]),
+                end: toSeconds(match[5], match[6], match[7], match[8]),
+                text: captionText
+            });
+        });
+
+        return cues.sort((left, right) => left.start - right.start);
+    }
+
+    function setCaptionsEnabled(enabled) {
+        captionsEnabled = enabled;
+        btnToggleCaptions.setAttribute('aria-pressed', String(enabled));
+        btnToggleCaptions.dataset.tooltip = enabled ? 'Turn captions off' : 'Captions';
+        btnToggleCaptions.classList.toggle('captions-active', enabled);
+        updatePlayerCaptions(video.currentTime);
+    }
+
+    function updateCaptionPosition() {
+        if (!bottomControls || !playerContainer) return;
+        playerContainer.style.setProperty(
+            '--caption-footer-offset',
+            `${Math.ceil(bottomControls.getBoundingClientRect().height + 18)}px`
+        );
+    }
+    updateCaptionPosition();
+    if (typeof ResizeObserver !== 'undefined' && bottomControls) {
+        new ResizeObserver(updateCaptionPosition).observe(bottomControls);
+    } else {
+        window.addEventListener('resize', updateCaptionPosition);
+    }
+
+    function updatePlayerCaptions(time) {
+        if (!captionsEnabled || !lyricsContainer.classList.contains('hidden')) {
+            playerCaptions.textContent = '';
+            playerCaptions.classList.add('hidden');
+            return;
+        }
+
+        const activeCue = captionCues.find(cue => time >= cue.start && time < cue.end);
+        const activeText = activeCue ? activeCue.text : '';
+        playerCaptions.textContent = activeText;
+        playerCaptions.classList.toggle('hidden', !activeText);
+    }
+
+    function getCaptionCuesFromLyrics(lyrics) {
+        return parseLRC(lyrics)
+            .filter(line => line.text || (line.words && line.words.length))
+            .map((line, index, lines) => ({
+                start: line.time,
+                end: lines[index + 1]?.time ?? Number.POSITIVE_INFINITY,
+                text: line.text || (line.words || []).map(word => word.text).join(' ')
+            }));
+    }
+
+    btnToggleCaptions.addEventListener('click', event => {
+        event.stopPropagation();
+        if (!captionsEnabled && !captionCues.length) {
+            const lyrics = getCurrentLyrics();
+            if (lyrics) captionCues = getCaptionCuesFromLyrics(lyrics);
+            if (!captionCues.length) {
+                subUpload.click();
+                return;
+            }
+        }
+        setCaptionsEnabled(!captionsEnabled);
+    });
+
+    subUpload.addEventListener('change', async () => {
+        const subtitleFile = subUpload.files[0];
+        subUpload.value = '';
+        if (!subtitleFile) return;
+
+        try {
+            const parsedCues = parseSubtitleFile(await subtitleFile.text());
+            if (!parsedCues.length) throw new Error('No valid subtitle cues were found in this file.');
+            captionCues = parsedCues;
+            setCaptionsEnabled(true);
+        } catch (error) {
+            console.error('Could not load subtitles:', error);
+            alert(error.message || 'Could not load this subtitle file.');
+        }
+    });
+
     function getLatestLyricCue(time) {
         let latestCue = null;
         for (const cueTime of lyricCueTimes) {
@@ -979,6 +1118,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- File Handling & Meta Reading ---
     function handleFile(file, handle = null) {
         if (!file) return;
+        trackScreenPreference = playerContainer.classList.contains('hidden')
+            ? null
+            : (lyricsContainer.classList.contains('hidden') ? 'player' : 'lyrics');
         const isVideo = isVideoFile(file);
         const isAudio = isAudioFile(file);
         const wasAudioPlaying = isAudioPlaying;
@@ -1024,6 +1166,13 @@ document.addEventListener("DOMContentLoaded", () => {
         autoLyricsLookupFileKey = null;
         syncedLyricsData = [];
         lastActiveLineIndex = -1;
+        captionCues = [];
+        captionsEnabled = false;
+        playerCaptions.textContent = '';
+        playerCaptions.classList.add('hidden');
+        btnToggleCaptions.setAttribute('aria-pressed', 'false');
+        btnToggleCaptions.classList.remove('captions-active');
+        btnToggleCaptions.dataset.tooltip = 'Captions';
 
         if (currentVideoURL) URL.revokeObjectURL(currentVideoURL);
         if (currentArtBlobUrl) { URL.revokeObjectURL(currentArtBlobUrl); currentArtBlobUrl = null; }
@@ -1037,6 +1186,7 @@ document.addEventListener("DOMContentLoaded", () => {
         video.src = currentVideoURL;
         fileKey = `nova_meta_${file.name}_${file.size}`;
         currentLyrics = localStorage.getItem(`${fileKey}_lyrics`) || null;
+        if (currentLyrics) captionCues = getCaptionCuesFromLyrics(currentLyrics);
         updateTrackNavigationButtons();
 
         if (isAudioPlaying) {
@@ -1067,11 +1217,15 @@ document.addEventListener("DOMContentLoaded", () => {
                         if (tags.lyrics) { currentLyrics = tags.lyrics.lyrics || tags.lyrics; }
                         else if (tags.USLT) { currentLyrics = tags.USLT.lyrics || tags.USLT; }
                         lyricsMetadataReady = true;
-                        if (appSettings.autoShowLyrics && !video.paused) ensureLyricsForCurrentTrack();
+                        if (currentFile === file) {
+                            captionCues = getCaptionCuesFromLyrics(getCurrentLyrics() || '');
+                            if (trackScreenPreference === 'lyrics') showLyrics();
+                            ensureLyricsForCurrentTrack();
+                        }
                     },
                     onError: function () {
                         lyricsMetadataReady = true;
-                        if (appSettings.autoShowLyrics && !video.paused) ensureLyricsForCurrentTrack();
+                        if (currentFile === file) ensureLyricsForCurrentTrack();
                     }
                 });
             }
@@ -1084,12 +1238,17 @@ document.addEventListener("DOMContentLoaded", () => {
         if (videoTitle) videoTitle.textContent = file.name;
 
         dismissResumeToast();
-        lyricsContainer.classList.add('hidden');
+        if (trackScreenPreference !== 'lyrics') {
+            lyricsContainer.classList.add('hidden');
+            setLyricsScreenActive(false);
+        }
         videoWrapper.classList.remove('static-lyrics-scroll');
 
         while (video.firstChild) video.removeChild(video.firstChild);
         welcomeScreen.classList.add('hidden');
         playerContainer.classList.remove('hidden');
+        resetHideControlsTimer();
+        if (trackScreenPreference === 'lyrics') showLyrics();
         resetCrop();
 
         video.onloadedmetadata = () => {
@@ -1107,6 +1266,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             }
             if (timeDuration) timeDuration.textContent = formatTime(video.duration);
+            if (currentFile === file) ensureLyricsForCurrentTrack();
             const savedStr = localStorage.getItem(`resume_${fileKey}`);
             if (savedStr) {
                 const savedTime = parseFloat(savedStr);
@@ -1386,7 +1546,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!currentFile) return;
         const isHidden = lyricsContainer.classList.contains('hidden');
         if (isHidden) {
+            trackScreenPreference = 'lyrics';
             lyricsContainer.classList.remove('hidden');
+            setLyricsScreenActive(true);
 
             let displayLyrics = getCurrentLyrics();
 
@@ -1401,7 +1563,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 lyricsEditor.classList.add('hidden');
             }
         } else {
+            trackScreenPreference = 'player';
             lyricsContainer.classList.add('hidden');
+            setLyricsScreenActive(false);
             videoWrapper.classList.remove('static-lyrics-scroll');
         }
     });
@@ -1425,16 +1589,22 @@ document.addEventListener("DOMContentLoaded", () => {
         lyricsHeader.classList.add('hide');
         lofiControls.classList.add('hide');
         if (playerContainer) playerContainer.style.cursor = 'none';
-        clearTimeout(hideControlsTimeout);
+        if (playerContainer) playerContainer.classList.add('captions-controls-hidden');
     });
 
     function getCurrentLyrics() {
         return (fileKey && localStorage.getItem(`${fileKey}_lyrics`)) || currentLyrics;
     }
 
+    function setLyricsScreenActive(active) {
+        playerContainer.classList.toggle('lyrics-screen-active', active);
+        updatePlayerCaptions(video.currentTime);
+    }
+
     function showLyrics() {
         if (!currentFile) return;
         lyricsContainer.classList.remove('hidden');
+        setLyricsScreenActive(true);
         const text = getCurrentLyrics();
         if (text) {
             renderLyricsToDisplay(text);
@@ -1557,11 +1727,11 @@ document.addEventListener("DOMContentLoaded", () => {
                         currentLyrics = fetchedText;
                         lyricsEditorDraft = null;
                         lyricsInput.value = fetchedText;
-                        renderLyricsToDisplay(fetchedText);
-                        lyricsEditor.classList.add('hidden');
-                        lyricsEmptyState.classList.add('hidden');
-                        lyricsDisplay.classList.remove('hidden');
-                        lyricsContainer.classList.remove('hidden');
+                        captionCues = getCaptionCuesFromLyrics(fetchedText);
+                        if (!silent || trackScreenPreference === 'lyrics' ||
+                            (appSettings.autoShowLyrics && trackScreenPreference !== 'player')) {
+                            showLyrics();
+                        }
                     }
                     return fetchedText;
                 } else {
@@ -1589,11 +1759,17 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function ensureLyricsForCurrentTrack() {
-        if (!appSettings.autoShowLyrics || !currentFile || !lyricsMetadataReady) return;
-        if (getCurrentLyrics()) {
-            showLyrics();
+        if (!currentFile || !lyricsMetadataReady) return;
+        const lyrics = getCurrentLyrics();
+        if (lyrics) {
+            captionCues = getCaptionCuesFromLyrics(lyrics);
+            if (appSettings.autoShowLyrics && trackScreenPreference !== 'player') showLyrics();
             return;
         }
+        const hasNativeCaptions = Array.from(video.textTracks || []).some(track =>
+            (track.kind === 'captions' || track.kind === 'subtitles') && track.cues && track.cues.length
+        );
+        if (captionCues.length || hasNativeCaptions || (!appSettings.autoFindLyrics && !appSettings.autoShowLyrics)) return;
         if (autoLyricsLookupFileKey === fileKey) return;
         autoLyricsLookupFileKey = fileKey;
         fetchLyricsForCurrentTrack(true);
@@ -1737,6 +1913,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const frameTime = metadata && Number.isFinite(metadata.mediaTime) ? metadata.mediaTime : video.currentTime;
         updateLyricsAtTime(frameTime);
+        updatePlayerCaptions(frameTime);
         if (video.paused || video.ended) return;
 
         if (lyricFrameUsesVideoCallback) {
@@ -1770,12 +1947,13 @@ document.addEventListener("DOMContentLoaded", () => {
     video.addEventListener('play', () => {
         if (playIcon) playIcon.textContent = 'pause';
         startLyricsFrameUpdates();
-        if (appSettings.autoShowLyrics) ensureLyricsForCurrentTrack();
+        ensureLyricsForCurrentTrack();
     });
     video.addEventListener('pause', () => {
         if (playIcon) playIcon.textContent = 'play_arrow';
         stopLyricsFrameUpdates();
         updateLyricsAtTime(video.currentTime);
+        updatePlayerCaptions(video.currentTime);
     });
     video.addEventListener('ended', () => {
         if (appSettings.repeatMode === 'all') navigatePlaylist(1, true);
@@ -1802,6 +1980,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (video.paused || typeof video.requestVideoFrameCallback !== 'function') {
                     updateLyricsAtTime(ct);
                 }
+                updatePlayerCaptions(ct);
 
                 rafPending = false;
             });
@@ -2077,9 +2256,191 @@ document.addEventListener("DOMContentLoaded", () => {
         else { document.exitFullscreen(); if (fullscreenIcon) fullscreenIcon.textContent = 'fullscreen'; }
     }
     if (btnFullscreen) btnFullscreen.addEventListener('click', toggleFullscreen);
+
+    function openAudioPictureInPicture() {
+        if (!documentPictureInPicture || typeof documentPictureInPicture.requestWindow !== 'function') {
+            throw new Error('Picture-in-picture for audio is not supported by this browser.');
+        }
+
+        const pipHeightKey = 'novaAudioPipHeight';
+        let requestedHeight = video.paused ? 164 : 136;
+        try {
+            const savedHeight = Number(localStorage.getItem(pipHeightKey));
+            if (Number.isFinite(savedHeight) && savedHeight >= 100 && savedHeight <= 600) {
+                requestedHeight = savedHeight;
+            }
+        } catch (error) {
+            console.error('Could not restore the audio picture-in-picture height:', error);
+        }
+
+        const pipTheme = getComputedStyle(document.documentElement);
+        const pipColors = {
+            background: pipTheme.getPropertyValue('--md-sys-color-background').trim() || '#121212',
+            surface: pipTheme.getPropertyValue('--md-sys-color-surface').trim() || '#1e1e1e',
+            surfaceVariant: pipTheme.getPropertyValue('--md-sys-color-surface-variant').trim() || '#2d2d2d',
+            onSurface: pipTheme.getPropertyValue('--md-sys-color-on-surface').trim() || '#e3e3e3',
+            primary: pipTheme.getPropertyValue('--md-sys-color-primary').trim() || '#a8c7fa',
+            onPrimary: pipTheme.getPropertyValue('--md-sys-color-on-primary').trim() || '#062e6f'
+        };
+
+        return documentPictureInPicture.requestWindow({ width: 300, height: requestedHeight }).then(windowRef => {
+            pipWindow = windowRef;
+            const pipDocument = windowRef.document;
+            const style = pipDocument.createElement('style');
+            style.textContent = `
+                * { box-sizing: border-box; }
+                body { margin: 0; padding: 12px; height: 100vh; color: ${pipColors.onSurface}; background: ${pipColors.background}; font: 13px system-ui, sans-serif; transition: opacity 180ms ease; }
+                body.pip-dimmed { opacity: 0.5; }
+                * { scrollbar-width: thin; scrollbar-color: ${pipColors.primary} ${pipColors.surfaceVariant}; }
+                *::-webkit-scrollbar { width: 8px; height: 8px; }
+                *::-webkit-scrollbar-track { border-radius: 8px; background: ${pipColors.surfaceVariant}; }
+                *::-webkit-scrollbar-thumb { border: 2px solid ${pipColors.surfaceVariant}; border-radius: 8px; background: ${pipColors.primary}; }
+                *::-webkit-scrollbar-thumb:hover { background: ${pipColors.onSurface}; }
+                main { height: 100%; min-width: 0; display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; align-items: center; }
+                img, .art-placeholder { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; background: ${pipColors.surface}; }
+                .art-placeholder { display: grid; place-items: center; font-size: 28px; color: ${pipColors.primary}; }
+                section { min-width: 0; }
+                strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+                .timeline { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 10px; color: ${pipColors.onSurface}; }
+                input { min-width: 0; width: 100%; height: 18px; accent-color: ${pipColors.primary}; }
+                button { display: grid; place-items: center; width: 34px; height: 30px; margin-top: 5px; padding: 0; border: 0; border-radius: 15px; color: ${pipColors.onPrimary}; background: ${pipColors.primary}; cursor: pointer; }
+                button svg { width: 18px; height: 18px; fill: currentColor; }
+                button:focus-visible, input:focus-visible { outline: 2px solid ${pipColors.primary}; outline-offset: 2px; }
+                @media (max-width: 260px) {
+                    body { padding: 8px; }
+                    main { grid-template-columns: 44px minmax(0, 1fr); gap: 8px; }
+                    img, .art-placeholder { width: 44px; height: 44px; border-radius: 8px; }
+                    .art-placeholder { font-size: 22px; }
+                    .timeline { gap: 4px; margin-top: 6px; font-size: 9px; }
+                }
+            `;
+            pipDocument.head.appendChild(style);
+
+            const main = pipDocument.createElement('main');
+            const art = musicArtImg && !musicArtImg.classList.contains('hidden') && musicArtImg.src
+                ? pipDocument.createElement('img')
+                : pipDocument.createElement('div');
+            if (art.tagName === 'IMG') {
+                art.src = musicArtImg.src;
+                art.alt = 'Album art';
+            } else {
+                art.className = 'art-placeholder';
+                art.textContent = '♫';
+                art.setAttribute('aria-label', 'NovaPlayer');
+            }
+
+            const section = pipDocument.createElement('section');
+            const title = pipDocument.createElement('strong');
+            title.textContent = videoTitle.textContent || 'NovaPlayer';
+            const timeline = pipDocument.createElement('div');
+            timeline.className = 'timeline';
+            const elapsed = pipDocument.createElement('span');
+            const seek = pipDocument.createElement('input');
+            seek.type = 'range';
+            seek.min = '0';
+            seek.step = '0.1';
+            const duration = pipDocument.createElement('span');
+            timeline.append(elapsed, seek, duration);
+            const play = pipDocument.createElement('button');
+            play.type = 'button';
+            play.setAttribute('aria-label', 'Play or pause');
+            play.addEventListener('click', () => togglePlay());
+            seek.addEventListener('input', () => {
+                video.currentTime = Number(seek.value);
+            });
+            section.append(title, timeline, play);
+            main.append(art, section);
+            pipDocument.body.replaceChildren(main);
+
+            const updateAudioPip = () => {
+                title.textContent = videoTitle.textContent || 'NovaPlayer';
+                play.setAttribute('aria-label', video.paused ? 'Play' : 'Pause');
+                play.innerHTML = video.paused
+                    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>'
+                    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>';
+                seek.max = Number.isFinite(video.duration) ? String(video.duration) : '0';
+                seek.value = String(video.currentTime || 0);
+                elapsed.textContent = formatTime(video.currentTime);
+                duration.textContent = formatTime(video.duration);
+            };
+            const mediaEvents = ['durationchange', 'loadedmetadata', 'pause', 'play', 'timeupdate'];
+            let dimTimeout = null;
+            let heightSaveTimeout = null;
+            const persistPipHeight = () => {
+                const height = Math.round(windowRef.innerHeight);
+                if (height < 100 || height > 600) return;
+                try {
+                    localStorage.setItem(pipHeightKey, String(height));
+                } catch (error) {
+                    console.error('Could not save the audio picture-in-picture height:', error);
+                }
+            };
+            const savePipHeight = () => {
+                clearTimeout(heightSaveTimeout);
+                heightSaveTimeout = setTimeout(persistPipHeight, 150);
+            };
+            const clearDimTimeout = () => {
+                clearTimeout(dimTimeout);
+                dimTimeout = null;
+            };
+            const setPipDimmed = dimmed => pipDocument.body.classList.toggle('pip-dimmed', dimmed);
+            const schedulePipDim = () => {
+                clearDimTimeout();
+                if (document.hidden && !windowRef.closed) {
+                    dimTimeout = setTimeout(() => setPipDimmed(true), 5000);
+                }
+            };
+            const handleVisibilityChange = () => {
+                setPipDimmed(false);
+                if (document.hidden) schedulePipDim();
+                else clearDimTimeout();
+            };
+            const handlePointerEnter = () => {
+                clearDimTimeout();
+                setPipDimmed(false);
+            };
+            const handlePointerLeave = () => {
+                if (document.hidden) schedulePipDim();
+            };
+            mediaEvents.forEach(type => video.addEventListener(type, updateAudioPip));
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+            pipDocument.body.addEventListener('pointerenter', handlePointerEnter);
+            pipDocument.body.addEventListener('pointerleave', handlePointerLeave);
+            windowRef.addEventListener('resize', savePipHeight);
+            windowRef.addEventListener('pagehide', () => {
+                clearTimeout(heightSaveTimeout);
+                persistPipHeight();
+                clearDimTimeout();
+                mediaEvents.forEach(type => video.removeEventListener(type, updateAudioPip));
+                document.removeEventListener('visibilitychange', handleVisibilityChange);
+                pipDocument.body.removeEventListener('pointerenter', handlePointerEnter);
+                pipDocument.body.removeEventListener('pointerleave', handlePointerLeave);
+                windowRef.removeEventListener('resize', savePipHeight);
+                pipWindow = null;
+            }, { once: true });
+            updateAudioPip();
+            handleVisibilityChange();
+        });
+    }
+
     if (btnPip) {
-        if (!document.pictureInPictureEnabled) btnPip.style.display = 'none';
-        btnPip.addEventListener('click', async () => { try { document.pictureInPictureElement ? await document.exitPictureInPicture() : await video.requestPictureInPicture(); } catch (e) { } });
+        if (!document.pictureInPictureEnabled && typeof documentPictureInPicture === 'undefined') btnPip.style.display = 'none';
+        btnPip.addEventListener('click', async () => {
+            try {
+                if (pipWindow && !pipWindow.closed) {
+                    pipWindow.close();
+                } else if (document.pictureInPictureElement) {
+                    await document.exitPictureInPicture();
+                } else if (isAudioPlaying) {
+                    await openAudioPictureInPicture();
+                } else {
+                    await video.requestPictureInPicture();
+                }
+            } catch (error) {
+                console.error('Could not open picture-in-picture:', error);
+                alert(error.message || 'Picture-in-picture could not be opened.');
+            }
+        });
     }
 
     // Crop Panel Logic
@@ -2179,29 +2540,37 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // Auto-hide UI
+    let hideControlsTimeout = null;
     function resetHideControlsTimer() {
+        clearTimeout(hideControlsTimeout);
         controls.forEach(c => c.classList.remove('hide'));
         lyricsTopControls.classList.remove('hide');
         lyricsHeader.classList.remove('hide');
         lofiControls.classList.remove('hide');
-        if (playerContainer) playerContainer.style.cursor = 'default';
-        clearTimeout(hideControlsTimeout);
-        hideControlsTimeout = setTimeout(() => {
-            const lyricsOpen = !lyricsContainer.classList.contains('hidden');
-            if (!video.paused && cropPanel.classList.contains('hidden') && settingsPanel.classList.contains('hidden') && lyricsEditor.classList.contains('hidden')) {
-                controls.forEach(c => c.classList.add('hide'));
-                if (playerContainer) playerContainer.style.cursor = 'none';
-
-                if (lyricsOpen) {
-                    lyricsHeader.classList.add('hide');
-                    lyricsTopControls.classList.add('hide');
-                    lofiControls.classList.add('hide');
-                }
-            }
-        }, 3000);
+        if (playerContainer) {
+            playerContainer.style.cursor = 'default';
+            playerContainer.classList.remove('captions-controls-hidden');
+        }
+        if (playerContainer && !playerContainer.classList.contains('hidden')) {
+            hideControlsTimeout = setTimeout(() => hidePlayerControls(), 3000);
+        }
     }
 
     if (playerContainer) { playerContainer.addEventListener('pointermove', resetHideControlsTimer); playerContainer.addEventListener('click', resetHideControlsTimer); }
+
+    function hidePlayerControls(event) {
+        if (event) event.stopPropagation();
+        clearTimeout(hideControlsTimeout);
+        controls.forEach(control => control.classList.add('hide'));
+        lyricsTopControls.classList.add('hide');
+        lyricsHeader.classList.add('hide');
+        lofiControls.classList.add('hide');
+        if (playerContainer) {
+            playerContainer.style.cursor = 'none';
+            playerContainer.classList.add('captions-controls-hidden');
+        }
+    }
+    if (btnHidePlayerControls) btnHidePlayerControls.addEventListener('click', hidePlayerControls);
 
     function closeAllPanels() {
         if (cropPanel) cropPanel.classList.add('hidden');

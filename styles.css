@@ -557,6 +557,43 @@ video {
     pointer-events: none;
 }
 
+#player-container.lyrics-screen-active #btn-toggle-captions {
+    display: none;
+}
+
+#player-captions {
+    position: absolute;
+    left: 50%;
+    bottom: var(--caption-footer-offset, 180px);
+    z-index: 26;
+    max-width: min(88vw, 900px);
+    max-height: 28vh;
+    overflow: hidden;
+    transform: translateX(-50%);
+    padding: 8px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.86);
+    color: #fff;
+    font-size: clamp(1rem, 2.8vw, 1.6rem);
+    font-weight: 500;
+    line-height: 1.35;
+    text-align: center;
+    text-wrap: balance;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+}
+
+#player-container.captions-controls-hidden #player-captions {
+    bottom: calc(24px + env(safe-area-inset-bottom));
+}
+
+.captions-active {
+    color: var(--md-sys-color-primary) !important;
+}
+
 .video-title {
     flex-grow: 1;
     margin-left: 15px;
@@ -2205,6 +2242,14 @@ input[type=range]::-moz-range-thumb:hover {
 
     #lyrics-container {
         padding: max(60px, calc(env(safe-area-inset-top) + 40px)) 12px max(96px, calc(env(safe-area-inset-bottom) + 72px));
+    }
+
+    #player-captions {
+        max-width: 92vw;
+        max-height: 24vh;
+        padding: 7px 12px;
+        border-radius: 10px;
+        font-size: clamp(1rem, 4.2vw, 1.45rem);
     }
 
     .lyrics-font-menu {
