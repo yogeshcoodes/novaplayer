@@ -1440,12 +1440,6 @@ video {
     font-size: calc(1rem * var(--lyrics-font-scale, 1));
 }
 
-#lyrics-container.theme-aesthetic .lyric-line,
-#lyrics-container.theme-aesthetic .lyric-word,
-#lyrics-container.theme-aesthetic .static-lyric {
-    text-shadow: 0 0 14px rgba(255, 255, 255, 0.7), 0 0 26px rgba(140, 170, 255, 0.45);
-}
-
 #lyrics-container.lyrics-font-cursive .lyric-line.active,
 #lyrics-container.lyrics-font-cursive .lyric-line.next,
 #lyrics-container.lyrics-font-cursive .lyric-line.previous,
@@ -1458,7 +1452,7 @@ video {
 #lyrics-container.theme-aesthetic.lyrics-font-cursive .lyric-line,
 #lyrics-container.theme-aesthetic.lyrics-font-cursive .lyric-word,
 #lyrics-container.theme-aesthetic.lyrics-font-cursive .static-lyric {
-    font-family: 'Caveat', cursive;
+    font-family: 'Caveat', cursive !important;
     font-size: clamp(2.1rem, 4.2vw, 3.2rem);
 }
 
@@ -1475,12 +1469,6 @@ video {
     font-size: clamp(1.8rem, 3.5vw, 2.8rem);
 }
 
-#lyrics-container.theme-aesthetic.lyrics-font-cursive .lyric-line,
-#lyrics-container.theme-aesthetic.lyrics-font-cursive .lyric-word,
-#lyrics-container.theme-aesthetic.lyrics-font-cursive .static-lyric {
-    text-shadow: 0 0 14px rgba(255, 255, 255, 0.7), 0 0 26px rgba(140, 170, 255, 0.45) !important;
-}
-
 .word-active,
 #lyrics-container.lyrics-font-vintage .word-active,
 #lyrics-container.lyrics-font-typewriter .word-active,
@@ -1492,6 +1480,14 @@ video {
     border-bottom: none !important;
     padding-bottom: 0 !important;
     box-shadow: none !important;
+}
+
+#lyrics-container.theme-aesthetic #lyrics-display,
+#lyrics-container.theme-aesthetic .stage-line,
+#lyrics-container.theme-aesthetic .lyric-line,
+#lyrics-container.theme-aesthetic .lyric-word,
+#lyrics-container.theme-aesthetic .static-lyric {
+    text-shadow: 0 0 14px rgba(255, 255, 255, 0.7), 0 0 26px rgba(140, 170, 255, 0.45) !important;
 }
 
 /* Editor Layout */
