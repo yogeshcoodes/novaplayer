@@ -1585,6 +1585,8 @@ video {
     left: 50%;
     transform: translate(-50%, -50%);
     background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     padding: 20px 15px;
     border-radius: 12px;
     display: flex;
