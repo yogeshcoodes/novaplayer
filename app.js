@@ -101,6 +101,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const lofiSpeedValue = document.getElementById('lofi-speed-value');
     const lofiReverbSlider = document.getElementById('lofi-reverb-slider');
     const lofiReverbValue = document.getElementById('lofi-reverb-value');
+    const lofiReverbWidthSlider = document.getElementById('lofi-reverb-width-slider');
+    const lofiReverbWidthValue = document.getElementById('lofi-reverb-width-value');
     const lofiEffectsStatus = document.getElementById('lofi-effects-status');
 
     // Lyrics Elements
@@ -149,6 +151,9 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentFileHandle = null;
     let lofiAudioContext = null;
     let lofiDryGain = null;
+    let lofiReverbCenterGain = null;
+    let lofiReverbWidthLeftGain = null;
+    let lofiReverbWidthRightGain = null;
     let lofiReverbGain = null;
     let currentTags = {};
     let currentPictureData = null;
@@ -498,6 +503,19 @@ document.addEventListener("DOMContentLoaded", () => {
         lofiReverbGain.setTargetAtTime(wet, now, 0.06);
     }
 
+    function updateLofiReverbWidth(amount) {
+        if (!lofiAudioContext || !lofiReverbCenterGain ||
+            !lofiReverbWidthLeftGain || !lofiReverbWidthRightGain) return;
+        const width = Math.max(0, Math.min(1, amount));
+        const angle = width * Math.PI / 2;
+        const now = lofiAudioContext.currentTime;
+        const center = Math.cos(angle);
+        const sides = Math.sin(angle) / Math.sqrt(2);
+        lofiReverbCenterGain.setTargetAtTime(center, now, 0.06);
+        lofiReverbWidthLeftGain.setTargetAtTime(sides, now, 0.06);
+        lofiReverbWidthRightGain.setTargetAtTime(sides, now, 0.06);
+    }
+
     let lofiAudioInitPromise = null;
     async function ensureLofiAudioGraph() {
         if (lofiAudioContext) {
@@ -519,11 +537,33 @@ document.addEventListener("DOMContentLoaded", () => {
                 const convolver = context.createConvolver();
                 const damping = context.createBiquadFilter();
                 const wetGain = context.createGain();
+                const centerGain = context.createGain();
+                const widthDelayLeft = context.createDelay(0.05);
+                const widthDelayRight = context.createDelay(0.05);
+                const widthDiffusionLeft = context.createBiquadFilter();
+                const widthDiffusionRight = context.createBiquadFilter();
+                const widthPanLeft = context.createStereoPanner();
+                const widthPanRight = context.createStereoPanner();
+                const widthGainLeft = context.createGain();
+                const widthGainRight = context.createGain();
                 const limiter = context.createDynamicsCompressor();
                 damping.type = 'lowpass';
                 damping.frequency.value = 9000;
                 convolver.normalize = false;
                 wetGain.gain.value = 0;
+                centerGain.gain.value = 1;
+                widthDelayLeft.delayTime.value = 0.009;
+                widthDelayRight.delayTime.value = 0.014;
+                widthDiffusionLeft.type = 'allpass';
+                widthDiffusionLeft.frequency.value = 700;
+                widthDiffusionLeft.Q.value = 0.7;
+                widthDiffusionRight.type = 'allpass';
+                widthDiffusionRight.frequency.value = 1100;
+                widthDiffusionRight.Q.value = 0.7;
+                widthPanLeft.pan.value = -1;
+                widthPanRight.pan.value = 1;
+                widthGainLeft.gain.value = 0;
+                widthGainRight.gain.value = 0;
                 limiter.threshold.value = -3;
                 limiter.knee.value = 6;
                 limiter.ratio.value = 4;
@@ -554,10 +594,25 @@ document.addEventListener("DOMContentLoaded", () => {
                 reverbSend.connect(convolver);
                 convolver.connect(damping);
                 damping.connect(wetGain);
-                wetGain.connect(limiter);
+                wetGain.connect(centerGain);
+                centerGain.connect(limiter);
+                wetGain.connect(widthDelayLeft);
+                widthDelayLeft.connect(widthDiffusionLeft);
+                widthDiffusionLeft.connect(widthPanLeft);
+                widthPanLeft.connect(widthGainLeft);
+                widthGainLeft.connect(limiter);
+                wetGain.connect(widthDelayRight);
+                widthDelayRight.connect(widthDiffusionRight);
+                widthDiffusionRight.connect(widthPanRight);
+                widthPanRight.connect(widthGainRight);
+                widthGainRight.connect(limiter);
                 limiter.connect(context.destination);
                 lofiDryGain = dryGain.gain;
                 lofiReverbGain = wetGain.gain;
+                lofiReverbCenterGain = centerGain.gain;
+                lofiReverbWidthLeftGain = widthGainLeft.gain;
+                lofiReverbWidthRightGain = widthGainRight.gain;
+                updateLofiReverbWidth(parseFloat(lofiReverbWidthSlider.value) / 100);
                 await context.resume();
             } catch (error) {
                 if (source) {
@@ -567,6 +622,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 lofiAudioContext = null;
                 lofiDryGain = null;
                 lofiReverbGain = null;
+                lofiReverbCenterGain = null;
+                lofiReverbWidthLeftGain = null;
+                lofiReverbWidthRightGain = null;
                 throw error;
             }
         })();
@@ -624,6 +682,8 @@ document.addEventListener("DOMContentLoaded", () => {
         lofiSpeedSlider.dispatchEvent(new Event('input', { bubbles: true }));
         lofiReverbSlider.value = isEnabled ? '40' : '0';
         lofiReverbSlider.dispatchEvent(new Event('input', { bubbles: true }));
+        lofiReverbWidthSlider.value = '0';
+        lofiReverbWidthSlider.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
     lofiEffectsPanel.addEventListener('pointerdown', showLofiEffectsPanel);
@@ -662,6 +722,12 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error('Could not apply Lo-Fi reverb:', error);
             setLofiEffectsStatus(`Reverb unavailable: ${error.message}`);
         }
+    });
+
+    lofiReverbWidthSlider.addEventListener('input', () => {
+        const amount = parseFloat(lofiReverbWidthSlider.value) / 100;
+        lofiReverbWidthValue.textContent = `${Math.round(amount * 100)}%`;
+        updateLofiReverbWidth(amount);
     });
 
     function renderFileManagerList() {
