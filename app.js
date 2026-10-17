@@ -151,9 +151,8 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentFileHandle = null;
     let lofiAudioContext = null;
     let lofiDryGain = null;
-    let lofiReverbCenterGain = null;
-    let lofiReverbWidthLeftGain = null;
-    let lofiReverbWidthRightGain = null;
+    let lofiReverbWidthFiltersLeft = [];
+    let lofiReverbWidthFiltersRight = [];
     let lofiReverbGain = null;
     let currentTags = {};
     let currentPictureData = null;
@@ -504,16 +503,19 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function updateLofiReverbWidth(amount) {
-        if (!lofiAudioContext || !lofiReverbCenterGain ||
-            !lofiReverbWidthLeftGain || !lofiReverbWidthRightGain) return;
+        if (!lofiAudioContext || !lofiReverbWidthFiltersLeft.length ||
+            !lofiReverbWidthFiltersRight.length) return;
         const width = Math.max(0, Math.min(1, amount));
-        const angle = width * Math.PI / 2;
         const now = lofiAudioContext.currentTime;
-        const center = Math.cos(angle);
-        const sides = Math.sin(angle) / Math.sqrt(2);
-        lofiReverbCenterGain.setTargetAtTime(center, now, 0.06);
-        lofiReverbWidthLeftGain.setTargetAtTime(sides, now, 0.06);
-        lofiReverbWidthRightGain.setTargetAtTime(sides, now, 0.06);
+        const frequenciesLeft = [180, 600, 1800];
+        const frequenciesRight = [350, 1000, 3000];
+        [lofiReverbWidthFiltersLeft, lofiReverbWidthFiltersRight].forEach((filters, channel) => {
+            const frequencies = channel === 0 ? frequenciesLeft : frequenciesRight;
+            filters.forEach((filter, index) => {
+                const frequency = width === 0 ? 0 : Math.pow(frequencies[index], width);
+                filter.frequency.setTargetAtTime(frequency, now, 0.06);
+            });
+        });
     }
 
     let lofiAudioInitPromise = null;
@@ -537,33 +539,25 @@ document.addEventListener("DOMContentLoaded", () => {
                 const convolver = context.createConvolver();
                 const damping = context.createBiquadFilter();
                 const wetGain = context.createGain();
-                const centerGain = context.createGain();
-                const widthDelayLeft = context.createDelay(0.05);
-                const widthDelayRight = context.createDelay(0.05);
-                const widthDiffusionLeft = context.createBiquadFilter();
-                const widthDiffusionRight = context.createBiquadFilter();
-                const widthPanLeft = context.createStereoPanner();
-                const widthPanRight = context.createStereoPanner();
-                const widthGainLeft = context.createGain();
-                const widthGainRight = context.createGain();
+                const widthInput = context.createGain();
+                widthInput.channelCount = 2;
+                widthInput.channelCountMode = 'explicit';
+                const widthSplitter = context.createChannelSplitter(2);
+                const widthMerger = context.createChannelMerger(2);
+                const widthFiltersLeft = [context.createBiquadFilter(), context.createBiquadFilter(), context.createBiquadFilter()];
+                const widthFiltersRight = [context.createBiquadFilter(), context.createBiquadFilter(), context.createBiquadFilter()];
                 const limiter = context.createDynamicsCompressor();
                 damping.type = 'lowpass';
                 damping.frequency.value = 9000;
                 convolver.normalize = false;
                 wetGain.gain.value = 0;
-                centerGain.gain.value = 1;
-                widthDelayLeft.delayTime.value = 0.009;
-                widthDelayRight.delayTime.value = 0.014;
-                widthDiffusionLeft.type = 'allpass';
-                widthDiffusionLeft.frequency.value = 700;
-                widthDiffusionLeft.Q.value = 0.7;
-                widthDiffusionRight.type = 'allpass';
-                widthDiffusionRight.frequency.value = 1100;
-                widthDiffusionRight.Q.value = 0.7;
-                widthPanLeft.pan.value = -1;
-                widthPanRight.pan.value = 1;
-                widthGainLeft.gain.value = 0;
-                widthGainRight.gain.value = 0;
+                widthInput.channelInterpretation = 'speakers';
+                widthMerger.channelInterpretation = 'discrete';
+                [...widthFiltersLeft, ...widthFiltersRight].forEach(filter => {
+                    filter.type = 'allpass';
+                    filter.frequency.value = 0;
+                    filter.Q.value = 0.7;
+                });
                 limiter.threshold.value = -3;
                 limiter.knee.value = 6;
                 limiter.ratio.value = 4;
@@ -594,24 +588,22 @@ document.addEventListener("DOMContentLoaded", () => {
                 reverbSend.connect(convolver);
                 convolver.connect(damping);
                 damping.connect(wetGain);
-                wetGain.connect(centerGain);
-                centerGain.connect(limiter);
-                wetGain.connect(widthDelayLeft);
-                widthDelayLeft.connect(widthDiffusionLeft);
-                widthDiffusionLeft.connect(widthPanLeft);
-                widthPanLeft.connect(widthGainLeft);
-                widthGainLeft.connect(limiter);
-                wetGain.connect(widthDelayRight);
-                widthDelayRight.connect(widthDiffusionRight);
-                widthDiffusionRight.connect(widthPanRight);
-                widthPanRight.connect(widthGainRight);
-                widthGainRight.connect(limiter);
+                wetGain.connect(widthInput);
+                widthInput.connect(widthSplitter);
+                widthSplitter.connect(widthFiltersLeft[0], 0, 0);
+                widthSplitter.connect(widthFiltersRight[0], 1, 0);
+                for (let index = 1; index < widthFiltersLeft.length; index++) {
+                    widthFiltersLeft[index - 1].connect(widthFiltersLeft[index]);
+                    widthFiltersRight[index - 1].connect(widthFiltersRight[index]);
+                }
+                widthFiltersLeft[widthFiltersLeft.length - 1].connect(widthMerger, 0, 0);
+                widthFiltersRight[widthFiltersRight.length - 1].connect(widthMerger, 0, 1);
+                widthMerger.connect(limiter);
                 limiter.connect(context.destination);
                 lofiDryGain = dryGain.gain;
                 lofiReverbGain = wetGain.gain;
-                lofiReverbCenterGain = centerGain.gain;
-                lofiReverbWidthLeftGain = widthGainLeft.gain;
-                lofiReverbWidthRightGain = widthGainRight.gain;
+                lofiReverbWidthFiltersLeft = widthFiltersLeft;
+                lofiReverbWidthFiltersRight = widthFiltersRight;
                 updateLofiReverbWidth(parseFloat(lofiReverbWidthSlider.value) / 100);
                 await context.resume();
             } catch (error) {
@@ -622,9 +614,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 lofiAudioContext = null;
                 lofiDryGain = null;
                 lofiReverbGain = null;
-                lofiReverbCenterGain = null;
-                lofiReverbWidthLeftGain = null;
-                lofiReverbWidthRightGain = null;
+                lofiReverbWidthFiltersLeft = [];
+                lofiReverbWidthFiltersRight = [];
                 throw error;
             }
         })();
