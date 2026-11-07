@@ -67,6 +67,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnToggleCaptions = document.getElementById('btn-toggle-captions');
     const playerCaptions = document.getElementById('player-captions');
     const btnSpeed = document.getElementById('btn-speed');
+    const btnAspectMode = document.getElementById('btn-aspect-mode');
     const btnCloseVideo = document.getElementById('btn-close-video');
     const videoTitle = document.getElementById('video-title');
 
@@ -151,8 +152,10 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentFileHandle = null;
     let lofiAudioContext = null;
     let lofiDryGain = null;
-    let lofiReverbWidthFiltersLeft = [];
-    let lofiReverbWidthFiltersRight = [];
+    let lofiReverbWidthMidInputGains = [];
+    let lofiReverbWidthSideInputGains = [];
+    let lofiReverbWidthMidOutputGains = [];
+    let lofiReverbWidthSideOutputGains = [];
     let lofiReverbGain = null;
     let currentTags = {};
     let currentPictureData = null;
@@ -199,6 +202,101 @@ document.addEventListener("DOMContentLoaded", () => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error || new Error('Could not open font storage.'));
     });
+
+    const mediaDatabase = new Promise((resolve, reject) => {
+        const request = indexedDB.open('novaplayer-recent-media', 1);
+        request.onupgradeneeded = () => {
+            if (!request.result.objectStoreNames.contains('media')) {
+                request.result.createObjectStore('media');
+            }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error('Could not open media storage.'));
+    });
+
+    async function storeRecentMediaEntries(items) {
+        const database = await mediaDatabase;
+        await new Promise((resolve, reject) => {
+            const transaction = database.transaction('media', 'readwrite');
+            transaction.objectStore('media').put({ id: 'recent', items, savedAt: Date.now() }, 'recent');
+            transaction.oncomplete = resolve;
+            transaction.onerror = () => reject(transaction.error || new Error('Could not save recent media.'));
+            transaction.onabort = () => reject(transaction.error || new Error('Recent media save was cancelled.'));
+        });
+    }
+
+    async function getRecentMediaEntries() {
+        const database = await mediaDatabase;
+        return new Promise((resolve, reject) => {
+            const request = database.transaction('media', 'readonly').objectStore('media').get('recent');
+            request.onsuccess = () => resolve(request.result && Array.isArray(request.result.items) ? request.result.items : []);
+            request.onerror = () => reject(request.error || new Error('Could not load recent media.'));
+        });
+    }
+
+    async function clearRecentMediaEntries() {
+        const database = await mediaDatabase;
+        await new Promise((resolve, reject) => {
+            const transaction = database.transaction('media', 'readwrite');
+            transaction.objectStore('media').delete('recent');
+            transaction.oncomplete = resolve;
+            transaction.onerror = () => reject(transaction.error || new Error('Could not clear recent media.'));
+            transaction.onabort = () => reject(transaction.error || new Error('Recent media clear was cancelled.'));
+        });
+    }
+
+    async function restoreRecentMediaEntries() {
+        const entries = await getRecentMediaEntries();
+        if (!entries.length) {
+            alert('No previously loaded media was found to restore.');
+            return;
+        }
+
+        const confirmed = window.confirm(`Restore ${entries.length} previously loaded item(s)?`);
+        if (!confirmed) return;
+
+        let restored = 0;
+        for (const item of entries) {
+            if (!item || !item.name || !item.size) continue;
+            try {
+                if (item.handle && typeof item.handle.getFile === 'function') {
+                    const file = await item.handle.getFile();
+                    if (isSupportedMediaFile(file)) {
+                        fmFilesMap.set(file.name + file.size, { file, handle: item.handle });
+                        restored += 1;
+                    }
+                }
+            } catch (error) {
+                console.warn('Could not restore saved media entry:', item, error);
+            }
+        }
+
+        if (restored > 0) renderFileManagerList();
+        else alert('The browser did not allow the saved media to be restored. Please re-open the files or folder manually.');
+    }
+
+    async function persistRecentMediaEntries() {
+        const entries = Array.from(fmFilesMap.values())
+            .filter(entry => entry && entry.file && isSupportedMediaFile(entry.file))
+            .map(({ file, handle }) => ({
+                name: file.name,
+                size: file.size,
+                type: file.type,
+                kind: handle && handle.kind ? handle.kind : 'file',
+                handle: handle && typeof handle === 'object' && 'kind' in handle ? handle : null
+            }));
+
+        if (!entries.length) {
+            await clearRecentMediaEntries();
+            return;
+        }
+
+        try {
+            await storeRecentMediaEntries(entries);
+        } catch (error) {
+            console.warn('Could not persist recent media library:', error);
+        }
+    }
 
     async function storeCustomLyricsFont(file) {
         const database = await lyricsFontDatabase;
@@ -446,14 +544,63 @@ document.addEventListener("DOMContentLoaded", () => {
         ['click', 'dblclick', 'pointerdown'].forEach(evt => { c.addEventListener(evt, e => e.stopPropagation()); });
     });
 
+    function isSystemFullscreenMode() {
+        return !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement ||
+            (window.innerWidth >= screen.width - 1 && window.innerHeight >= screen.height - 1));
+    }
+
     function toggleSettingsPanel(e) {
         e.stopPropagation();
+        if (isSystemFullscreenMode()) {
+            closeAllPanels();
+            return;
+        }
         const isHidden = settingsPanel.classList.contains('hidden');
         closeAllPanels();
         if (isHidden) settingsPanel.classList.remove('hidden');
     }
     if (btnSettingsWelcome) btnSettingsWelcome.addEventListener('click', toggleSettingsPanel);
     if (btnSettingsPlayer) btnSettingsPlayer.addEventListener('click', toggleSettingsPanel);
+    document.addEventListener('fullscreenchange', () => {
+        if (isSystemFullscreenMode()) closeAllPanels();
+    });
+    window.addEventListener('keydown', (event) => {
+        if (event.key === 'F11') {
+            closeAllPanels();
+        }
+    });
+
+    const btnRestoreRecentMedia = document.getElementById('btn-restore-recent-media');
+    const btnClearRecentMedia = document.getElementById('btn-clear-recent-media');
+
+    if (btnRestoreRecentMedia) {
+        btnRestoreRecentMedia.addEventListener('click', () => restoreRecentMediaEntries());
+    }
+    if (btnClearRecentMedia) {
+        btnClearRecentMedia.addEventListener('click', async () => {
+            const confirmed = window.confirm('Clear the remembered previous media library?');
+            if (!confirmed) return;
+            try {
+                await clearRecentMediaEntries();
+                alert('Previous media memory cleared.');
+            } catch (error) {
+                console.error('Could not clear remembered media:', error);
+                alert('Could not clear remembered media.');
+            }
+        });
+    }
+
+    setTimeout(async () => {
+        try {
+            const entries = await getRecentMediaEntries();
+            if (entries && entries.length) {
+                const shouldRestore = window.confirm('Restore previously loaded media from your last session?');
+                if (shouldRestore) await restoreRecentMediaEntries();
+            }
+        } catch (error) {
+            console.warn('Could not prompt for stored media restore:', error);
+        }
+    }, 300);
 
     // --- File & Folder Manager Setup ---
     function formatBytes(bytes, decimals = 2) {
@@ -503,19 +650,22 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function updateLofiReverbWidth(amount) {
-        if (!lofiAudioContext || !lofiReverbWidthFiltersLeft.length ||
-            !lofiReverbWidthFiltersRight.length) return;
-        const width = Math.max(0, Math.min(1, amount));
+        if (!lofiAudioContext || lofiReverbWidthMidInputGains.length !== 2 ||
+            lofiReverbWidthSideInputGains.length !== 2 ||
+            lofiReverbWidthMidOutputGains.length !== 2 ||
+            lofiReverbWidthSideOutputGains.length !== 2) return;
+        const width = Math.max(0, Math.min(1, amount)) * 1.8;
         const now = lofiAudioContext.currentTime;
-        const frequenciesLeft = [180, 600, 1800];
-        const frequenciesRight = [350, 1000, 3000];
-        [lofiReverbWidthFiltersLeft, lofiReverbWidthFiltersRight].forEach((filters, channel) => {
-            const frequencies = channel === 0 ? frequenciesLeft : frequenciesRight;
-            filters.forEach((filter, index) => {
-                const frequency = width === 0 ? 0 : Math.pow(frequencies[index], width);
-                filter.frequency.setTargetAtTime(frequency, now, 0.06);
-            });
+        const levelCompensation = 1 / Math.sqrt(1 + 3 * width * width);
+        lofiReverbWidthMidInputGains[0].gain.setTargetAtTime(0.5, now, 0.06);
+        lofiReverbWidthMidInputGains[1].gain.setTargetAtTime(0.5, now, 0.06);
+        lofiReverbWidthSideInputGains[0].gain.setTargetAtTime(0.5, now, 0.06);
+        lofiReverbWidthSideInputGains[1].gain.setTargetAtTime(-0.5, now, 0.06);
+        lofiReverbWidthMidOutputGains.forEach(gain => {
+            gain.gain.setTargetAtTime(levelCompensation, now, 0.06);
         });
+        lofiReverbWidthSideOutputGains[0].gain.setTargetAtTime(width * levelCompensation, now, 0.06);
+        lofiReverbWidthSideOutputGains[1].gain.setTargetAtTime(-width * levelCompensation, now, 0.06);
     }
 
     let lofiAudioInitPromise = null;
@@ -539,24 +689,29 @@ document.addEventListener("DOMContentLoaded", () => {
                 const convolver = context.createConvolver();
                 const damping = context.createBiquadFilter();
                 const wetGain = context.createGain();
-                const widthInput = context.createGain();
-                widthInput.channelCount = 2;
-                widthInput.channelCountMode = 'explicit';
-                const widthSplitter = context.createChannelSplitter(2);
+                const widthInputSplitter = context.createChannelSplitter(2);
+                const widthMidInputGains = [context.createGain(), context.createGain()];
+                const widthSideInputGains = [context.createGain(), context.createGain()];
+                const widthMidBus = context.createGain();
+                const widthSideBus = context.createGain();
                 const widthMerger = context.createChannelMerger(2);
-                const widthFiltersLeft = [context.createBiquadFilter(), context.createBiquadFilter(), context.createBiquadFilter()];
-                const widthFiltersRight = [context.createBiquadFilter(), context.createBiquadFilter(), context.createBiquadFilter()];
+                const widthMidOutputGains = [context.createGain(), context.createGain()];
+                const widthSideOutputGains = [context.createGain(), context.createGain()];
                 const limiter = context.createDynamicsCompressor();
                 damping.type = 'lowpass';
                 damping.frequency.value = 9000;
                 convolver.normalize = false;
                 wetGain.gain.value = 0;
-                widthInput.channelInterpretation = 'speakers';
+                widthMidBus.channelCount = 1;
+                widthMidBus.channelCountMode = 'explicit';
+                widthMidBus.channelInterpretation = 'discrete';
+                widthSideBus.channelCount = 1;
+                widthSideBus.channelCountMode = 'explicit';
+                widthSideBus.channelInterpretation = 'discrete';
                 widthMerger.channelInterpretation = 'discrete';
-                [...widthFiltersLeft, ...widthFiltersRight].forEach(filter => {
-                    filter.type = 'allpass';
-                    filter.frequency.value = 0;
-                    filter.Q.value = 0.7;
+                [...widthMidOutputGains, ...widthSideOutputGains].forEach(gain => {
+                    gain.channelCount = 1;
+                    gain.channelCountMode = 'explicit';
                 });
                 limiter.threshold.value = -3;
                 limiter.knee.value = 6;
@@ -565,20 +720,58 @@ document.addEventListener("DOMContentLoaded", () => {
                 limiter.release.value = 0.2;
 
                 const impulseLength = Math.floor(context.sampleRate * 1.4);
-                const impulse = context.createBuffer(1, impulseLength, context.sampleRate);
-                for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
-                    const samples = impulse.getChannelData(channel);
-                    let energy = 0;
-                    for (let index = 0; index < impulseLength; index++) {
-                        const decay = Math.exp(-index / (context.sampleRate * 0.55));
-                        const fadeIn = Math.min(1, index / (context.sampleRate * 0.008));
-                        const sample = (Math.random() * 2 - 1) * decay * fadeIn;
-                        samples[index] = sample;
-                        energy += sample * sample;
-                    }
-                    const gain = energy > 0 ? 0.5 / Math.sqrt(energy) : 0;
-                    for (let index = 0; index < impulseLength; index++) samples[index] *= gain;
+                const impulse = context.createBuffer(2, impulseLength, context.sampleRate);
+                const leftSamples = impulse.getChannelData(0);
+                const rightSamples = impulse.getChannelData(1);
+                let energy = 0;
+                for (let index = 0; index < impulseLength; index++) {
+                    const decay = Math.exp(-index / (context.sampleRate * 0.55));
+                    const fadeIn = Math.min(1, index / (context.sampleRate * 0.008));
+                    const sample = (Math.random() * 2 - 1) * decay * fadeIn;
+                    leftSamples[index] = sample;
+                    energy += sample * sample;
                 }
+                const impulseGain = energy > 0 ? 0.5 / Math.sqrt(energy) : 0;
+                for (let index = 0; index < impulseLength; index++) {
+                    leftSamples[index] *= impulseGain;
+                    rightSamples[index] = leftSamples[index];
+                }
+                const impulseDiffusion = [
+                    [40, 1.3], [120, 0.7], [360, 1.2], [1100, 0.65], [3300, 1.2], [9900, 0.7], [18000, 1]
+                ];
+                let diffusedSamples = rightSamples;
+                for (const [frequency, q] of impulseDiffusion) {
+                    const omega = 2 * Math.PI * frequency / context.sampleRate;
+                    const alpha = Math.sin(omega) / (2 * q);
+                    const a0 = 1 + alpha;
+                    const b0 = (1 - alpha) / a0;
+                    const b1 = (-2 * Math.cos(omega)) / a0;
+                    const a2 = b0;
+                    const output = new Float32Array(impulseLength);
+                    let x1 = 0;
+                    let x2 = 0;
+                    let y1 = 0;
+                    let y2 = 0;
+                    for (let index = 0; index < impulseLength; index++) {
+                        const input = diffusedSamples[index];
+                        const sample = b0 * input + b1 * x1 + x2 - b1 * y1 - a2 * y2;
+                        output[index] = sample;
+                        x2 = x1;
+                        x1 = input;
+                        y2 = y1;
+                        y1 = sample;
+                    }
+                    diffusedSamples = output;
+                }
+                for (let index = 0; index < impulseLength; index++) {
+                    rightSamples[index] = diffusedSamples[index];
+                }
+                let diffusedEnergy = 0;
+                for (let index = 0; index < impulseLength; index++) {
+                    diffusedEnergy += rightSamples[index] * rightSamples[index];
+                }
+                const diffusedGain = diffusedEnergy > 0 ? 0.5 / Math.sqrt(diffusedEnergy) : 0;
+                for (let index = 0; index < impulseLength; index++) rightSamples[index] *= diffusedGain;
                 convolver.buffer = impulse;
 
                 source = context.createMediaElementSource(video);
@@ -588,22 +781,31 @@ document.addEventListener("DOMContentLoaded", () => {
                 reverbSend.connect(convolver);
                 convolver.connect(damping);
                 damping.connect(wetGain);
-                wetGain.connect(widthInput);
-                widthInput.connect(widthSplitter);
-                widthSplitter.connect(widthFiltersLeft[0], 0, 0);
-                widthSplitter.connect(widthFiltersRight[0], 1, 0);
-                for (let index = 1; index < widthFiltersLeft.length; index++) {
-                    widthFiltersLeft[index - 1].connect(widthFiltersLeft[index]);
-                    widthFiltersRight[index - 1].connect(widthFiltersRight[index]);
-                }
-                widthFiltersLeft[widthFiltersLeft.length - 1].connect(widthMerger, 0, 0);
-                widthFiltersRight[widthFiltersRight.length - 1].connect(widthMerger, 0, 1);
+                wetGain.connect(widthInputSplitter);
+                widthInputSplitter.connect(widthMidInputGains[0], 0);
+                widthInputSplitter.connect(widthMidInputGains[1], 1);
+                widthInputSplitter.connect(widthSideInputGains[0], 0);
+                widthInputSplitter.connect(widthSideInputGains[1], 1);
+                widthMidInputGains[0].connect(widthMidBus);
+                widthMidInputGains[1].connect(widthMidBus);
+                widthSideInputGains[0].connect(widthSideBus);
+                widthSideInputGains[1].connect(widthSideBus);
+                widthMidBus.connect(widthMidOutputGains[0]);
+                widthMidBus.connect(widthMidOutputGains[1]);
+                widthSideBus.connect(widthSideOutputGains[0]);
+                widthSideBus.connect(widthSideOutputGains[1]);
+                widthMidOutputGains[0].connect(widthMerger, 0, 0);
+                widthSideOutputGains[0].connect(widthMerger, 0, 0);
+                widthMidOutputGains[1].connect(widthMerger, 0, 1);
+                widthSideOutputGains[1].connect(widthMerger, 0, 1);
                 widthMerger.connect(limiter);
                 limiter.connect(context.destination);
                 lofiDryGain = dryGain.gain;
                 lofiReverbGain = wetGain.gain;
-                lofiReverbWidthFiltersLeft = widthFiltersLeft;
-                lofiReverbWidthFiltersRight = widthFiltersRight;
+                lofiReverbWidthMidInputGains = widthMidInputGains;
+                lofiReverbWidthSideInputGains = widthSideInputGains;
+                lofiReverbWidthMidOutputGains = widthMidOutputGains;
+                lofiReverbWidthSideOutputGains = widthSideOutputGains;
                 updateLofiReverbWidth(parseFloat(lofiReverbWidthSlider.value) / 100);
                 await context.resume();
             } catch (error) {
@@ -614,8 +816,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 lofiAudioContext = null;
                 lofiDryGain = null;
                 lofiReverbGain = null;
-                lofiReverbWidthFiltersLeft = [];
-                lofiReverbWidthFiltersRight = [];
+                lofiReverbWidthMidInputGains = [];
+                lofiReverbWidthSideInputGains = [];
+                lofiReverbWidthMidOutputGains = [];
+                lofiReverbWidthSideOutputGains = [];
                 throw error;
             }
         })();
@@ -858,6 +1062,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                 }
                 renderFileManagerList();
+                await persistRecentMediaEntries();
             } catch (e) { }
         } else {
             videoUpload.click();
@@ -877,6 +1082,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                 }
                 renderFileManagerList();
+                await persistRecentMediaEntries();
             } catch (e) { }
         } else {
             folderUpload.click();
@@ -888,20 +1094,22 @@ document.addEventListener("DOMContentLoaded", () => {
     btnLoadFolder.addEventListener('click', openDirectoryPicker);
     btnFmLoadFolder.addEventListener('click', openDirectoryPicker);
 
-    if (videoUpload) videoUpload.addEventListener('change', e => {
+    if (videoUpload) videoUpload.addEventListener('change', async e => {
         if (e.target.files.length) {
             Array.from(e.target.files)
                 .filter(file => isSupportedMediaFile(file))
                 .forEach(f => fmFilesMap.set(f.name + f.size, { file: f, handle: null }));
             renderFileManagerList();
+            await persistRecentMediaEntries();
         }
     });
-    if (folderUpload) folderUpload.addEventListener('change', e => {
+    if (folderUpload) folderUpload.addEventListener('change', async e => {
         if (e.target.files.length) {
             Array.from(e.target.files)
                 .filter(file => isSupportedMediaFile(file))
                 .forEach(f => fmFilesMap.set(f.name + f.size, { file: f, handle: null }));
             renderFileManagerList();
+            await persistRecentMediaEntries();
         }
     });
 
@@ -925,12 +1133,13 @@ document.addEventListener("DOMContentLoaded", () => {
     ['dragenter', 'dragover'].forEach(ev => dropZone && dropZone.addEventListener(ev, () => dropZone.classList.add('dragover')));
     ['dragleave', 'drop'].forEach(ev => dropZone && dropZone.addEventListener(ev, () => dropZone.classList.remove('dragover')));
 
-    function handleDrop(e) {
+    async function handleDrop(e) {
         if (e.dataTransfer.files.length) {
             Array.from(e.dataTransfer.files)
                 .filter(file => isSupportedMediaFile(file))
                 .forEach(f => fmFilesMap.set(f.name + f.size, { file: f, handle: null }));
             renderFileManagerList();
+            await persistRecentMediaEntries();
         }
     }
     if (dropZone) dropZone.addEventListener('drop', handleDrop);
@@ -2528,16 +2737,26 @@ document.addEventListener("DOMContentLoaded", () => {
         btn.addEventListener('click', (e) => {
             const p = e.target.dataset.preset;
             resetCrop();
-            if (p === 'fill') video.style.objectFit = 'cover';
-            else if (p === 'stretch') video.style.objectFit = 'fill';
-            else if (p === '21:9') { if (cropTop) cropTop.value = 12; if (cropBottom) cropBottom.value = 12; updateCrop(); }
+            if (p === 'fill') {
+                video.style.objectFit = 'cover';
+                aspectMode = 'fill';
+            } else if (p === 'stretch') {
+                video.style.objectFit = 'fill';
+                aspectMode = 'stretch';
+            } else if (p === '21:9') {
+                if (cropTop) cropTop.value = 12; if (cropBottom) cropBottom.value = 12; updateCrop();
+                aspectMode = 'fit';
+            } else {
+                aspectMode = 'fit';
+            }
+            updateAspectModeButton();
         });
     });
 
     function resetCrop() {
         if (cropTop) cropTop.value = 0; if (cropBottom) cropBottom.value = 0; if (cropLeft) cropLeft.value = 0; if (cropRight) cropRight.value = 0;
         if (zoomSlider) zoomSlider.value = 1; panX = 0; panY = 0; if (stretchSlider) stretchSlider.value = 0;
-        video.style.objectFit = 'contain'; updateCrop();
+        video.style.objectFit = 'contain'; aspectMode = 'fit'; updateCrop(); updateAspectModeButton();
     }
     const btnResetCrop = document.getElementById('btn-reset-crop');
     if (btnResetCrop) btnResetCrop.addEventListener('click', resetCrop);
@@ -2593,6 +2812,37 @@ document.addEventListener("DOMContentLoaded", () => {
                 if ('mozPreservesPitch' in video) video.mozPreservesPitch = currentSpeed === 1;
                 if ('webkitPreservesPitch' in video) video.webkitPreservesPitch = currentSpeed === 1;
             }
+        });
+    }
+
+    let aspectMode = 'fit';
+    function updateAspectModeButton() {
+        if (!btnAspectMode) return;
+        const label = aspectMode.charAt(0).toUpperCase() + aspectMode.slice(1);
+        btnAspectMode.textContent = label;
+        btnAspectMode.dataset.tooltip = `Aspect: ${label}`;
+        btnAspectMode.setAttribute('aria-label', `Aspect: ${label}`);
+    }
+
+    function applyAspectPreset(mode) {
+        aspectMode = mode;
+        if (mode === 'fit') {
+            video.style.objectFit = 'contain';
+        } else if (mode === 'fill') {
+            video.style.objectFit = 'cover';
+        } else if (mode === 'stretch') {
+            video.style.objectFit = 'fill';
+        }
+        updateAspectModeButton();
+        updateCrop();
+    }
+
+    if (btnAspectMode) {
+        updateAspectModeButton();
+        btnAspectMode.addEventListener('click', () => {
+            const modes = ['fit', 'fill', 'stretch'];
+            const currentIndex = modes.indexOf(aspectMode);
+            applyAspectPreset(modes[(currentIndex + 1) % modes.length]);
         });
     }
 
