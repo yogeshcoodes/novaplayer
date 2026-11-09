@@ -1,4 +1,4 @@
-const CACHE_NAME = 'novaplayer-static-v12';
+const CACHE_NAME = 'novaplayer-static-v14';
 const APP_FILES = [
     './',
     './index.html',

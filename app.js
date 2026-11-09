@@ -1314,6 +1314,11 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    function scrollActiveLyricIntoView(activeIndex, behavior = 'smooth') {
+        const activeLine = syncedLyricsData[activeIndex]?.element;
+        if (activeLine) activeLine.scrollIntoView({ behavior, block: 'center', inline: 'nearest' });
+    }
+
     function renderLyricsToDisplay(text) {
         lyricsDisplay.innerHTML = '';
         const isManualMode = appSettings.lyricsDisplayMode === 'manual';
@@ -1361,6 +1366,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
             applyLyricLineStates(initialActiveIndex);
             lastActiveLineIndex = initialActiveIndex;
+            scrollActiveLyricIntoView(initialActiveIndex, 'auto');
             const latestCue = getLatestLyricCue(currentTime);
             lyricsDisplay.classList.toggle(
                 'lyrics-display-idle',
@@ -2167,6 +2173,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (activeIndex !== lastActiveLineIndex) {
             applyLyricLineStates(activeIndex);
             lastActiveLineIndex = activeIndex;
+            scrollActiveLyricIntoView(activeIndex);
         }
     }
 
